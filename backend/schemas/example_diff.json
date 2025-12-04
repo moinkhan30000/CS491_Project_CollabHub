@@ -1,0 +1,104 @@
+{
+  "baseVersion": "commit-abc123",
+  "targetVersion": "commit-def456",
+  "timestamp": "2025-12-03T11:00:00Z",
+  "summary": {
+    "added": 1,
+    "modified": 1,
+    "deleted": 0,
+    "total": 2
+  },
+  "changes": [
+    {
+      "changeType": "modified",
+      "elementId": "1a2b3c4d-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+      "category": "Walls",
+      "type": "Basic Wall: Generic - 200mm",
+      "parameterChanges": [
+        {
+          "name": "Height",
+          "oldValue": 3000,
+          "newValue": 3500,
+          "type": "Length"
+        },
+        {
+          "name": "Fire Rating",
+          "oldValue": "2 Hour",
+          "newValue": "3 Hour",
+          "type": "Text"
+        }
+      ],
+      "geometryChanged": true,
+      "locationChanged": false,
+      "oldData": {
+        "parameters": {
+          "Height": {
+            "value": 3000,
+            "type": "Length"
+          },
+          "Fire Rating": {
+            "value": "2 Hour",
+            "type": "Text"
+          }
+        },
+        "geometry": {
+          "geometryHash": "abc123def456"
+        }
+      },
+      "newData": {
+        "parameters": {
+          "Height": {
+            "value": 3500,
+            "type": "Length"
+          },
+          "Fire Rating": {
+            "value": "3 Hour",
+            "type": "Text"
+          }
+        },
+        "geometry": {
+          "geometryHash": "xyz789new"
+        }
+      }
+    },
+    {
+      "changeType": "added",
+      "elementId": "3c4d5e6f-7g8h-9i0j-1k2l-m3n4o5p6q7r8",
+      "category": "Windows",
+      "type": "Fixed: 1200 x 1500mm",
+      "parameterChanges": [],
+      "geometryChanged": false,
+      "locationChanged": false,
+      "oldData": null,
+      "newData": {
+        "id": "3c4d5e6f-7g8h-9i0j-1k2l-m3n4o5p6q7r8",
+        "category": "Windows",
+        "type": "Fixed: 1200 x 1500mm",
+        "parameters": {
+          "Width": {
+            "value": 1200,
+            "type": "Length"
+          },
+          "Height": {
+            "value": 1500,
+            "type": "Length"
+          },
+          "Mark": {
+            "value": "W101",
+            "type": "Text"
+          }
+        },
+        "location": {
+          "type": "point",
+          "point": {
+            "x": 1000.0,
+            "y": 0.0,
+            "z": 1000.0
+          },
+          "rotation": 0.0
+        }
+      }
+    }
+  ],
+  "conflicts": []
+}

@@ -1,0 +1,60 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Revit Plugin",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "plugins\\RevitVersionControl\\RevitVersionControl.csproj",
+                "/p:Configuration=Debug",
+                "/p:Platform=x64",
+                "/t:Build",
+                "/v:minimal"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Clean Revit Plugin",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "plugins\\RevitVersionControl\\RevitVersionControl.csproj",
+                "/t:Clean",
+                "/v:minimal"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Rebuild Revit Plugin",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "plugins\\RevitVersionControl\\RevitVersionControl.csproj",
+                "/p:Configuration=Debug",
+                "/p:Platform=x64",
+                "/t:Rebuild",
+                "/v:minimal"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

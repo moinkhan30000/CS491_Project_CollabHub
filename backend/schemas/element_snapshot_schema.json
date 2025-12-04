@@ -1,0 +1,208 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Revit Element Snapshot Schema",
+  "description": "Schema for element-level data extracted from Revit models for version control",
+  "type": "object",
+  "required": ["version", "projectId", "timestamp", "elements"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version"
+    },
+    "projectId": {
+      "type": "string",
+      "description": "Unique project identifier"
+    },
+    "modelId": {
+      "type": "string",
+      "description": "Unique model/file identifier"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When snapshot was taken"
+    },
+    "userName": {
+      "type": "string",
+      "description": "User who created snapshot"
+    },
+    "commitMessage": {
+      "type": "string",
+      "description": "Optional commit message"
+    },
+    "elements": {
+      "type": "array",
+      "description": "Array of all model elements",
+      "items": {
+        "$ref": "#/definitions/element"
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional model metadata",
+      "properties": {
+        "revitVersion": {
+          "type": "string"
+        },
+        "buildNumber": {
+          "type": "string"
+        },
+        "projectInfo": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "element": {
+      "type": "object",
+      "required": ["id", "category", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Revit Element UniqueId"
+        },
+        "category": {
+          "type": "string",
+          "description": "Element category (Wall, Door, Window, etc.)"
+        },
+        "type": {
+          "type": "string",
+          "description": "Element type/family name"
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Key-value pairs of element parameters",
+          "additionalProperties": {
+            "$ref": "#/definitions/parameter"
+          }
+        },
+        "geometry": {
+          "$ref": "#/definitions/geometry",
+          "description": "Simplified geometry reference"
+        },
+        "location": {
+          "$ref": "#/definitions/location",
+          "description": "Element location/placement"
+        },
+        "worksetId": {
+          "type": "string",
+          "description": "Workset identifier if applicable"
+        },
+        "levelId": {
+          "type": "string",
+          "description": "Level reference"
+        },
+        "phaseCreated": {
+          "type": "string",
+          "description": "Phase when element was created"
+        },
+        "phaseDemolished": {
+          "type": "string",
+          "description": "Phase when element is demolished"
+        }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "required": ["value", "type"],
+      "properties": {
+        "value": {
+          "description": "Parameter value (string, number, boolean)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Text", "Integer", "Number", "Length", "Area", "Volume", "Angle", "YesNo", "ElementId"]
+        },
+        "isReadOnly": {
+          "type": "boolean"
+        },
+        "storageType": {
+          "type": "string"
+        }
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "properties": {
+        "boundingBox": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "$ref": "#/definitions/point3d"
+            },
+            "max": {
+              "$ref": "#/definitions/point3d"
+            }
+          }
+        },
+        "geometryHash": {
+          "type": "string",
+          "description": "Hash of geometry for change detection"
+        },
+        "solids": {
+          "type": "array",
+          "description": "Simplified solid representations",
+          "items": {
+            "type": "object",
+            "properties": {
+              "volume": {
+                "type": "number"
+              },
+              "surfaceArea": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "point"
+            },
+            "point": {
+              "$ref": "#/definitions/point3d"
+            },
+            "rotation": {
+              "type": "number",
+              "description": "Rotation angle in radians"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "curve"
+            },
+            "startPoint": {
+              "$ref": "#/definitions/point3d"
+            },
+            "endPoint": {
+              "$ref": "#/definitions/point3d"
+            }
+          }
+        }
+      ]
+    },
+    "point3d": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

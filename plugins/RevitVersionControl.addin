@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Revit Version Control</Name>
+    <Assembly>RevitVersionControl.dll</Assembly>
+    <AddInId>{A7C9F8E3-1234-5678-90AB-CDEF12345678}</AddInId>
+    <FullClassName>RevitVersionControl.Application</FullClassName>
+    <VendorId>RVCT</VendorId>
+    <VendorDescription>Revit Version Control Team</VendorDescription>
+    <VisibilityMode>AlwaysVisible</VisibilityMode>
+  </AddIn>
+</RevitAddIns>

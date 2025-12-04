@@ -1,0 +1,47 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "plugins", "plugins", "{07D57EEB-2F50-60C4-C011-FE4FA775C9A8}"
+	ProjectSection(SolutionItems) = preProject
+		plugins\RevitVersionControl\Services\ApiClient.cs = plugins\RevitVersionControl\Services\ApiClient.cs
+		plugins\RevitVersionControl\Application.cs = plugins\RevitVersionControl\Application.cs
+		plugins\RevitVersionControl\Commands\Commands.cs = plugins\RevitVersionControl\Commands\Commands.cs
+		plugins\RevitVersionControl\UI\DiffMergePane.xaml = plugins\RevitVersionControl\UI\DiffMergePane.xaml
+		plugins\RevitVersionControl\UI\DiffMergePane.xaml.cs = plugins\RevitVersionControl\UI\DiffMergePane.xaml.cs
+		plugins\RevitVersionControl\Services\ElementExtractor.cs = plugins\RevitVersionControl\Services\ElementExtractor.cs
+		plugins\RevitVersionControl\obj\Debug\UI\HistoryPane.g.cs = plugins\RevitVersionControl\obj\Debug\UI\HistoryPane.g.cs
+		plugins\RevitVersionControl\obj\Debug\UI\HistoryPane.g.i.cs = plugins\RevitVersionControl\obj\Debug\UI\HistoryPane.g.i.cs
+		plugins\RevitVersionControl\UI\HistoryPane.xaml = plugins\RevitVersionControl\UI\HistoryPane.xaml
+		plugins\RevitVersionControl\UI\HistoryPane.xaml.cs = plugins\RevitVersionControl\UI\HistoryPane.xaml.cs
+		plugins\RevitVersionControl\obj\Debug\UI\PublishDialog.g.cs = plugins\RevitVersionControl\obj\Debug\UI\PublishDialog.g.cs
+		plugins\RevitVersionControl\obj\Debug\UI\PublishDialog.g.i.cs = plugins\RevitVersionControl\obj\Debug\UI\PublishDialog.g.i.cs
+		plugins\RevitVersionControl\UI\PublishDialog.xaml = plugins\RevitVersionControl\UI\PublishDialog.xaml
+		plugins\RevitVersionControl\UI\PublishDialog.xaml.cs = plugins\RevitVersionControl\UI\PublishDialog.xaml.cs
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RevitVersionControl", "plugins\RevitVersionControl\RevitVersionControl.csproj", "{A7C9F8E3-1234-5678-90AB-CDEF12345678}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A7C9F8E3-1234-5678-90AB-CDEF12345678}.Debug|x64.ActiveCfg = Debug|x64
+		{A7C9F8E3-1234-5678-90AB-CDEF12345678}.Debug|x64.Build.0 = Debug|x64
+		{A7C9F8E3-1234-5678-90AB-CDEF12345678}.Release|x64.ActiveCfg = Release|x64
+		{A7C9F8E3-1234-5678-90AB-CDEF12345678}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A7C9F8E3-1234-5678-90AB-CDEF12345678} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {CACDB647-E139-4A32-8431-B7867D2B5B99}
+	EndGlobalSection
+EndGlobal
+
+

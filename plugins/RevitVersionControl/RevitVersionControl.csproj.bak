@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A7C9F8E3-1234-5678-90AB-CDEF12345678}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>RevitVersionControl</RootNamespace>
+    <AssemblyName>RevitVersionControl</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>`n    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\Newtonsoft.Json.13.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="RevitAPI">
+      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Application.cs" />
+    <Compile Include="Commands\Commands.cs" />
+    <Compile Include="Services\ApiClient.cs" />
+    <Compile Include="Services\ElementExtractor.cs" />
+    <Compile Include="UI\DiffSelectDialog.cs" />
+    <Compile Include="UI\PublishDialog.xaml.cs">
+      <DependentUpon>PublishDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\HistoryPane.xaml.cs">
+      <DependentUpon>HistoryPane.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\DiffMergePane.xaml.cs">
+      <DependentUpon>DiffMergePane.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\PullDialog.cs" />
+    <Compile Include="UI\SettingsDialog.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="UI\PublishDialog.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\HistoryPane.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\DiffMergePane.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="RevitVersionControl.addin">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>
+      copy "$(ProjectDir)*.addin" "%AppData%\Autodesk\Revit\Addins\2024\"
+      copy "$(TargetPath)" "%AppData%\Autodesk\Revit\Addins\2024\"
+    </PostBuildEvent>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,145 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Revit Element Diff Schema",
+  "description": "Schema for differences between two element snapshots",
+  "type": "object",
+  "required": ["baseVersion", "targetVersion", "changes"],
+  "properties": {
+    "baseVersion": {
+      "type": "string",
+      "description": "Base snapshot/commit ID"
+    },
+    "targetVersion": {
+      "type": "string",
+      "description": "Target snapshot/commit ID"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "added": {
+          "type": "integer"
+        },
+        "modified": {
+          "type": "integer"
+        },
+        "deleted": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "description": "Array of all changes",
+      "items": {
+        "$ref": "#/definitions/change"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "description": "Array of detected conflicts",
+      "items": {
+        "$ref": "#/definitions/conflict"
+      }
+    }
+  },
+  "definitions": {
+    "change": {
+      "type": "object",
+      "required": ["changeType", "elementId"],
+      "properties": {
+        "changeType": {
+          "type": "string",
+          "enum": ["added", "modified", "deleted"]
+        },
+        "elementId": {
+          "type": "string",
+          "description": "Revit Element UniqueId"
+        },
+        "category": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "parameterChanges": {
+          "type": "array",
+          "description": "Which parameters changed",
+          "items": {
+            "$ref": "#/definitions/parameterChange"
+          }
+        },
+        "geometryChanged": {
+          "type": "boolean",
+          "description": "Whether geometry was modified"
+        },
+        "locationChanged": {
+          "type": "boolean",
+          "description": "Whether location/placement changed"
+        },
+        "oldData": {
+          "type": "object",
+          "description": "Original element data (for modified/deleted)"
+        },
+        "newData": {
+          "type": "object",
+          "description": "New element data (for added/modified)"
+        }
+      }
+    },
+    "parameterChange": {
+      "type": "object",
+      "required": ["name", "oldValue", "newValue"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Parameter name"
+        },
+        "oldValue": {
+          "description": "Previous value"
+        },
+        "newValue": {
+          "description": "New value"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["elementId", "conflictType", "description"],
+      "properties": {
+        "elementId": {
+          "type": "string"
+        },
+        "conflictType": {
+          "type": "string",
+          "enum": ["concurrent_modification", "delete_modified", "parameter_conflict"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "localChange": {
+          "type": "object"
+        },
+        "remoteChange": {
+          "type": "object"
+        },
+        "resolutionOptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["keep_local", "accept_remote", "manual_resolve"]
+          }
+        }
+      }
+    }
+  }
+}

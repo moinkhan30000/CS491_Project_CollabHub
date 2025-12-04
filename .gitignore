@@ -1,0 +1,17 @@
+# Visual Studio / Revit build outputs
+.vs/
+bin/
+obj/
+packages/
+backend/.env
+
+# User-specific files
+*.user
+*.suo
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node modules (if added later)
+node_modules/
