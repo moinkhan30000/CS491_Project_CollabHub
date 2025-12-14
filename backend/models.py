@@ -133,7 +133,6 @@ class CommitDetail(CommitBase):
     children: List[str] = []
     summary: Dict[str, int]
     # We deliberately exclude 'snapshot' here to keep the response light
-    # unless you specifically want to send the huge blob back in this endpoint
 
 # ============= Diff Models =============
 

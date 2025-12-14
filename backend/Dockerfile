@@ -1,4 +1,3 @@
-# Use Python 3.10 since that is what you were using locally
 FROM python:3.10-slim
 
 WORKDIR /app

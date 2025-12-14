@@ -16,7 +16,6 @@ port = os.getenv("DB_PORT", "5432")
 DATABASE_URL = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 
 # Create Engine
-# Note: We removed {"check_same_thread": False} because that is only for SQLite
 engine = create_engine(DATABASE_URL, echo=True)
 
 def create_db_and_tables():
