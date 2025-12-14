@@ -5,6 +5,7 @@ Pydantic models for request/response validation
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Dict, Optional, Any, Literal
 from datetime import datetime
+from sqlmodel import SQLModel, Field, JSON, Column
 
 # ============= Authentication Models =============
 
@@ -23,11 +24,12 @@ class Token(BaseModel):
     expiresIn: int
     user: Dict[str, Any]
 
-class User(BaseModel):
-    userId: str
-    email: EmailStr
+class User(SQLModel, table=True):
+    userId: str = Field(primary_key=True)
+    email: str = Field(index=True, unique=True) # Changed to str for DB compatibility
+    password_hash: str
     fullName: str
-    createdAt: datetime
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
 
 # ============= Project Models =============
 
@@ -36,14 +38,16 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
 
-class Project(BaseModel):
-    projectId: str
+class Project(SQLModel, table=True):
+    projectId: str = Field(primary_key=True)
     name: str
     description: Optional[str] = None
-    createdBy: str
-    createdAt: datetime
-    lastModified: datetime
+    createdBy: str = Field(foreign_key="user.userId")
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    lastModified: datetime = Field(default_factory=datetime.utcnow)
     memberCount: int = 0
+    # Store settings as JSON in the database
+    settings: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
 
 # ============= Element & Snapshot Models =============
 
@@ -98,26 +102,38 @@ class ElementSnapshot(BaseModel):
 
 # ============= Commit Models =============
 
+# 1. Base Class: Shared fields (No table=True here)
+class CommitBase(SQLModel):
+    projectId: str = Field(foreign_key="project.projectId", index=True)
+    modelId: str
+    message: str
+    author: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    parentCommit: Optional[str] = Field(default=None, foreign_key="commit.commitId")
+    elementCount: int
+    changedElements: int
+
+# 2. Database Table: Inherits Base + adds Primary Key and JSON Column
+class Commit(CommitBase, table=True):
+    commitId: str = Field(primary_key=True)
+    
+    # The JSON Blob column (Only exists in the DB version)
+    snapshot: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
+
+# 3. Request Model: What the user sends to create a commit
 class CommitCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: Optional[str] = None
     snapshot: ElementSnapshot
 
-class Commit(BaseModel):
+# 4. Response/Detail Model: Inherits Base (NOT Table) + adds extra fields
+class CommitDetail(CommitBase):
     commitId: str
-    projectId: str
-    modelId: str
-    message: str
-    author: str
-    timestamp: datetime
-    parentCommit: Optional[str] = None
-    elementCount: int
-    changedElements: int
-
-class CommitDetail(Commit):
     children: List[str] = []
     summary: Dict[str, int]
+    # We deliberately exclude 'snapshot' here to keep the response light
+    # unless you specifically want to send the huge blob back in this endpoint
 
 # ============= Diff Models =============
 

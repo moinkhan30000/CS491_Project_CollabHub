@@ -15,3 +15,5 @@ __pycache__/
 
 # Node modules (if added later)
 node_modules/
+
+.env
