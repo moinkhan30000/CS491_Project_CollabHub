@@ -58,7 +58,10 @@ async def list_commits(
     # Enrich commits with author info
     enriched_commits = []
     for commit in commits:
-        commit_dict = commit.model_dump()
+        # CRITICAL FIX: Exclude the 'snapshot' field
+        # The snapshot is huge (MBs of data). We don't want to send it 
+        # when just listing the history.
+        commit_dict = commit.model_dump(exclude={"snapshot"})
         user = storage.get_user_by_id(commit.author)
         if user:
             commit_dict["author"] = {
@@ -93,6 +96,9 @@ async def get_commit(project_id: str, commit_id: str):
         "modified": 0,
         "deleted": 0
     }
+
+    # Convert DB Object -> Dictionary, removing the heavy snapshot
+    commit_data = commit.model_dump(exclude={"snapshot"})
     
     # In production, compute real summary by comparing with parent
     

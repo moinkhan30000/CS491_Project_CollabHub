@@ -12,6 +12,10 @@ Revit add-in plus Python backend for element-level version control: publish snap
 
 ## Quick Start
 Backend:
+
+docker-compose up --build
+
+or alternatvely:
 1) `cd backend`
 2) `python -m pip install -r requirements.txt`
 3) `python main.py` (serves `http://localhost:8000`)
