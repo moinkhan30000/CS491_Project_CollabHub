@@ -24,12 +24,13 @@ class Token(BaseModel):
     expiresIn: int
     user: Dict[str, Any]
 
-class User(SQLModel, table=True):
-    userId: str = Field(primary_key=True)
-    email: str = Field(index=True, unique=True) # Changed to str for DB compatibility
-    password_hash: str
+class UserRead(BaseModel):
+    userId: str
+    email: str
     fullName: str
-    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    createdAt: datetime
+
+# User entity moved to backend/entities/user_entity.py
 
 # ============= Project Models =============
 
@@ -38,16 +39,7 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
 
-class Project(SQLModel, table=True):
-    projectId: str = Field(primary_key=True)
-    name: str
-    description: Optional[str] = None
-    createdBy: str = Field(foreign_key="user.userId")
-    createdAt: datetime = Field(default_factory=datetime.utcnow)
-    lastModified: datetime = Field(default_factory=datetime.utcnow)
-    memberCount: int = 0
-    # Store settings as JSON in the database
-    settings: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+# Project entity moved to backend/entities/project_entity.py
 
 # ============= Element & Snapshot Models =============
 
@@ -102,23 +94,7 @@ class ElementSnapshot(BaseModel):
 
 # ============= Commit Models =============
 
-# 1. Base Class: Shared fields (No table=True here)
-class CommitBase(SQLModel):
-    projectId: str = Field(foreign_key="project.projectId", index=True)
-    modelId: str
-    message: str
-    author: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    parentCommit: Optional[str] = Field(default=None, foreign_key="commit.commitId")
-    elementCount: int
-    changedElements: int
-
-# 2. Database Table: Inherits Base + adds Primary Key and JSON Column
-class Commit(CommitBase, table=True):
-    commitId: str = Field(primary_key=True)
-    
-    # The JSON Blob column (Only exists in the DB version)
-    snapshot: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
+# CommitBase and Commit entity moved to backend/entities/commit_entity.py
 
 # 3. Request Model: What the user sends to create a commit
 class CommitCreate(BaseModel):
@@ -127,12 +103,22 @@ class CommitCreate(BaseModel):
     parentCommit: Optional[str] = None
     snapshot: ElementSnapshot
 
-# 4. Response/Detail Model: Inherits Base (NOT Table) + adds extra fields
-class CommitDetail(CommitBase):
+# 4. Response/Detail Model
+class CommitDetail(BaseModel):
+    # Field duplicated from CommitBase to decrypt dependency
+    projectId: str
+    modelId: str
+    message: str
+    author: str
+    timestamp: datetime
+    parentCommit: Optional[str] = None
+    elementCount: int
+    changedElements: int
+    
     commitId: str
     children: List[str] = []
     summary: Dict[str, int]
-    # We deliberately exclude 'snapshot' here to keep the response light
+
 
 # ============= Diff Models =============
 

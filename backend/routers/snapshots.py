@@ -4,17 +4,23 @@ Snapshots & Commits Router
 
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import Optional
-from models import CommitCreate, Commit, CommitDetail, ElementSnapshot
-from storage import storage
+from models import CommitCreate, CommitDetail, ElementSnapshot
+from entities.commit_entity import Commit
+from repositories.project_repository import ProjectRepository
+from repositories.commit_repository import CommitRepository
+from repositories.user_repository import UserRepository
 
 router = APIRouter()
+project_repo = ProjectRepository()
+commit_repo = CommitRepository()
+user_repo = UserRepository()
 
 @router.post("/{project_id}/snapshots", response_model=Commit, status_code=status.HTTP_201_CREATED)
 async def create_snapshot(project_id: str, commit_data: CommitCreate):
     """Publish a new snapshot (create commit)"""
     
     # Verify project exists
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -25,7 +31,7 @@ async def create_snapshot(project_id: str, commit_data: CommitCreate):
     user_id = "default-user"
     
     # Create commit with snapshot
-    commit = storage.create_commit(
+    commit = commit_repo.create_commit(
         project_id=project_id,
         model_id=commit_data.modelId,
         message=commit_data.commitMessage,
@@ -45,15 +51,15 @@ async def list_commits(
     """Get commit history for a project"""
     
     # Verify project exists
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
     
-    commits = storage.list_commits(project_id, limit, offset)
-    total = storage.get_commit_count(project_id)
+    commits = commit_repo.list_commits(project_id, limit, offset)
+    total = commit_repo.get_commit_count(project_id)
     
     # Enrich commits with author info
     enriched_commits = []
@@ -62,7 +68,7 @@ async def list_commits(
         # The snapshot is huge (MBs of data). We don't want to send it 
         # when just listing the history.
         commit_dict = commit.model_dump(exclude={"snapshot"})
-        user = storage.get_user_by_id(commit.author)
+        user = user_repo.get_user_by_id(commit.author)
         if user:
             commit_dict["author"] = {
                 "userId": user.userId,
@@ -81,7 +87,7 @@ async def list_commits(
 async def get_commit(project_id: str, commit_id: str):
     """Get specific commit details"""
     
-    commit = storage.get_commit(commit_id)
+    commit = commit_repo.get_commit(commit_id)
     if not commit or commit.projectId != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -89,7 +95,7 @@ async def get_commit(project_id: str, commit_id: str):
         )
     
     # Get snapshot to compute summary
-    snapshot = storage.get_snapshot(commit_id)
+    snapshot = commit_repo.get_snapshot(commit_id)
     
     summary = {
         "added": 0,
@@ -112,14 +118,14 @@ async def get_commit(project_id: str, commit_id: str):
 async def get_snapshot(project_id: str, commit_id: str):
     """Download full snapshot for a commit"""
     
-    commit = storage.get_commit(commit_id)
+    commit = commit_repo.get_commit(commit_id)
     if not commit or commit.projectId != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Commit not found"
         )
     
-    snapshot = storage.get_snapshot(commit_id)
+    snapshot = commit_repo.get_snapshot(commit_id)
     if not snapshot:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -4,11 +4,14 @@ Diff Router
 
 from fastapi import APIRouter, HTTPException, status, Query
 from models import DiffResult
-from storage import storage
+from repositories.project_repository import ProjectRepository
+from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine
 
 router = APIRouter()
 diff_engine = DiffEngine()
+project_repo = ProjectRepository()
+commit_repo = CommitRepository()
 
 @router.get("/{project_id}/diff", response_model=DiffResult)
 async def compute_diff(
@@ -19,7 +22,7 @@ async def compute_diff(
     """Compare two commits and get differences"""
     
     # Verify project exists
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -27,8 +30,8 @@ async def compute_diff(
         )
     
     # Get snapshots
-    base_snapshot = storage.get_snapshot(base)
-    target_snapshot = storage.get_snapshot(target)
+    base_snapshot = commit_repo.get_snapshot(base)
+    target_snapshot = commit_repo.get_snapshot(target)
     
     if not base_snapshot:
         raise HTTPException(
