@@ -3,7 +3,7 @@ Diff Router
 """
 
 from fastapi import APIRouter, HTTPException, status, Query
-from models import DiffResult
+from schemas.diff_schema import DiffResult
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine

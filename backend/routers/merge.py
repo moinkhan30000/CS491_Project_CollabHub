@@ -3,7 +3,7 @@ Merge Router
 """
 
 from fastapi import APIRouter, HTTPException, status
-from models import MergeRequest, MergeResult, PullRequest, PullResult
+from schemas.diff_schema import MergeRequest, MergeResult, PullRequest, PullResult
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine

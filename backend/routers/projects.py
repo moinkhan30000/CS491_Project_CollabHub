@@ -4,7 +4,7 @@ Projects Router
 
 from fastapi import APIRouter, HTTPException, status
 from typing import List
-from models import ProjectCreate
+from schemas.project_schema import ProjectCreate
 from entities.project_entity import Project
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository

@@ -4,7 +4,8 @@ Snapshots & Commits Router
 
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import Optional
-from models import CommitCreate, CommitDetail, ElementSnapshot
+from schemas.commit_schema import CommitCreate, CommitDetail
+from schemas.element_schema import ElementSnapshot
 from entities.commit_entity import Commit
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository

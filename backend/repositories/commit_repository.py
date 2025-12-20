@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from database import engine
 from entities.commit_entity import Commit
 from entities.project_entity import Project
-from models import ElementSnapshot
+from schemas.element_schema import ElementSnapshot
 
 class CommitRepository:
     def create_commit(

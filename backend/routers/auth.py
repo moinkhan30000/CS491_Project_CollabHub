@@ -4,7 +4,7 @@ Authentication Router
 
 import os
 from fastapi import APIRouter, HTTPException, status
-from models import UserRegister, UserLogin, Token, UserRead
+from schemas.auth_schema import UserRegister, UserLogin, Token, UserRead
 from entities.user_entity import User
 from repositories.user_repository import UserRepository
 from passlib.context import CryptContext
