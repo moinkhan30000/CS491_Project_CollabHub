@@ -90,9 +90,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 # Actually, I should check the user_repo first to be safe, but since I'm rewriting this file, 
 # I can just implement get_current_user correctly assuming I will fix user_repo.
 
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister):
-    """Register a new user"""
+    """Register a new user and return tokens (Auto-Login)"""
+    
+    # Check if user already exists
     existing_user = user_repo.get_user_by_email(user_data.email)
     if existing_user:
         raise HTTPException(
@@ -100,13 +102,30 @@ def register(user_data: UserRegister):
             detail="User with this email already exists"
         )
     
+    # Hash password
     password_hash = pwd_context.hash(user_data.password)
+    
+    # Create user
     user = user_repo.create_user(
         email=user_data.email,
         password_hash=password_hash,
         full_name=user_data.fullName
     )
-    return user
+    
+    # Auto-Login: Create tokens
+    access_token = create_access_token(user.userId)
+    refresh_token = create_refresh_token(user.userId)
+    
+    return Token(
+        accessToken=access_token,
+        refreshToken=refresh_token,
+        expiresIn=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user={
+            "userId": user.userId,
+            "email": user.email,
+            "fullName": user.fullName
+        }
+    )
 
 @router.post("/login", response_model=Token)
 def login(credentials: UserLogin):
