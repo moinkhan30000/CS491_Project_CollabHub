@@ -1,0 +1,35 @@
+<Window x:Class="RevitVersionControl.UI.LoginDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Login - CollabHub" Height="400" Width="400"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <TextBlock Text="Login to CollabHub" FontSize="18" FontWeight="Bold" Margin="0,0,0,20" HorizontalAlignment="Center"/>
+        
+        <StackPanel Grid.Row="1" Margin="0,0,0,10">
+            <Label Content="Email:"/>
+            <TextBox x:Name="EmailTextBox" Padding="5"/>
+        </StackPanel>
+        
+        <StackPanel Grid.Row="2" Margin="0,0,0,20">
+            <Label Content="Password:"/>
+            <PasswordBox x:Name="PasswordBox" Padding="5"/>
+        </StackPanel>
+        
+        <Button x:Name="LoginButton" Grid.Row="3" Content="Login" Height="30" Click="LoginButton_Click" IsDefault="True"/>
+        
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,10,0,0">
+            <TextBlock Text="Don't have an account?" VerticalAlignment="Center" Margin="0,0,5,0"/>
+            <Button Content="Register" Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}" 
+                    Foreground="Blue" Click="RegisterButton_Click" Cursor="Hand" Background="Transparent" BorderThickness="0"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -12,11 +12,16 @@ namespace RevitVersionControl.Services
     /// </summary>
     public class ApiClient
     {
+        private static ApiClient _instance;
+        public static ApiClient Instance => _instance ?? (_instance = new ApiClient());
+
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
         private string _authToken;
 
-        public ApiClient(string baseUrl = "http://localhost:8000/api/v1")
+        public bool IsLoggedIn => !string.IsNullOrEmpty(_authToken);
+
+        private ApiClient(string baseUrl = "http://localhost:8000/api/v1")
         {
             _baseUrl = baseUrl;
             _httpClient = new HttpClient();
@@ -32,17 +37,51 @@ namespace RevitVersionControl.Services
 
         // ========== Authentication ==========
 
-        public async Task<LoginResponse> LoginAsync(string email, string password)
+        public async Task<bool> LoginAsync(string email, string password)
         {
             var payload = new { email, password };
             var response = await PostAsync<LoginResponse>("/auth/login", payload);
             
-            if (response != null)
+            if (response != null && !string.IsNullOrEmpty(response.AccessToken))
             {
                 SetAuthToken(response.AccessToken);
+                return true;
             }
             
-            return response;
+            return false;
+        }
+
+        public async Task<bool> RegisterAsync(string fullName, string email, string password)
+        {
+            var payload = new 
+            { 
+                fullName,
+                email, 
+                password 
+            };
+            
+            // Backend returns Token object directly on register (auto-login)
+            var response = await PostAsync<LoginResponse>("/auth/register", payload);
+            
+            if (response != null && !string.IsNullOrEmpty(response.AccessToken))
+            {
+                SetAuthToken(response.AccessToken);
+                return true;
+            }
+            
+            return false;
+        }
+
+        public void Logout()
+        {
+            _authToken = null;
+            _httpClient.DefaultRequestHeaders.Remove("Authorization");
+            try 
+            {
+                // Optional: Call backend logout if needed, but JWT is stateless usually
+                // PostAsync<object>("/auth/logout", new { }).Wait(); 
+            }
+            catch { }
         }
 
         // ========== Projects ==========

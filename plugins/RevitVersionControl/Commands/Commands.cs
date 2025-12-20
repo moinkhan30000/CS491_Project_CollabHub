@@ -10,10 +10,81 @@ using RevitVersionControl.UI;
 namespace RevitVersionControl.Commands
 {
     [Transaction(TransactionMode.Manual)]
+    public class LoginCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            try
+            {
+                if (ApiClient.Instance.IsLoggedIn)
+                {
+                    // Logout flow
+                    ApiClient.Instance.Logout();
+                    Application.SetLoggedInState(false);
+                    TaskDialog.Show("Logged Out", "You have been logged out successfully.");
+                }
+                else
+                {
+                    // Login flow
+                    var loginDialog = new LoginDialog();
+                    if (loginDialog.ShowDialog() == true)
+                    {
+                        // Dialog sets result true only if login/register succeeded
+                        Application.SetLoggedInState(true);
+                        TaskDialog.Show("Success", "Logged in successfully!");
+                    }
+                }
+                return Result.Succeeded;
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return Result.Failed;
+            }
+        }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public class RegisterCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            try
+            {
+                if (ApiClient.Instance.IsLoggedIn)
+                {
+                    TaskDialog.Show("Info", "You are already logged in.");
+                    return Result.Succeeded;
+                }
+
+                var registerDialog = new RegisterDialog();
+                if (registerDialog.ShowDialog() == true)
+                {
+                    // Register dialog handles auto-login on success
+                    Application.SetLoggedInState(true);
+                    TaskDialog.Show("Success", "Account created and logged in!");
+                }
+                return Result.Succeeded;
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return Result.Failed;
+            }
+        }
+    }
+
+    [Transaction(TransactionMode.Manual)]
     public class PublishCommand : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!ApiClient.Instance.IsLoggedIn)
+            {
+                TaskDialog.Show("Authentication Required", "Please log in to use this feature.");
+                return Result.Cancelled;
+            }
+
             try
             {
                 UIApplication uiApp = commandData.Application;
@@ -48,9 +119,9 @@ namespace RevitVersionControl.Commands
                 };
 
                 // Publish to server
-                var apiClient = new ApiClient();
-                var publishTask = Task.Run(async () => await apiClient.PublishSnapshotAsync(projectId, snapshot));
-                var commit = publishTask.Result;
+                var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot));
+                // Note: Blocking call is not ideal but standard for simple Revit commands.
+                var commit = publishTask.GetAwaiter().GetResult();
 
                 if (commit != null)
                 {
@@ -80,6 +151,9 @@ namespace RevitVersionControl.Commands
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!ApiClient.Instance.IsLoggedIn) 
+                return Result.Cancelled;
+
             try
             {
                 // Show history pane
@@ -108,6 +182,9 @@ namespace RevitVersionControl.Commands
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!ApiClient.Instance.IsLoggedIn)
+                return Result.Cancelled;
+
             try
             {
                 UIApplication uiApp = commandData.Application;
@@ -127,10 +204,9 @@ namespace RevitVersionControl.Commands
                 // Get changes from server
                 TaskDialog.Show("Pulling", "Fetching changes from server...");
                 
-                var apiClient = new ApiClient();
                 var pullTask = Task.Run(async () => 
-                    await apiClient.PullChangesAsync(projectId, currentCommit, targetCommit));
-                var pullResult = pullTask.Result;
+                    await ApiClient.Instance.PullChangesAsync(projectId, currentCommit, targetCommit));
+                var pullResult = pullTask.GetAwaiter().GetResult();
 
                 if (pullResult == null)
                 {
@@ -177,6 +253,9 @@ namespace RevitVersionControl.Commands
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!ApiClient.Instance.IsLoggedIn)
+                return Result.Cancelled;
+
             try
             {
                 // Show diff dialog for selecting versions to compare
@@ -193,10 +272,9 @@ namespace RevitVersionControl.Commands
                 // Get diff from server
                 TaskDialog.Show("Computing Diff", "Comparing versions...");
                 
-                var apiClient = new ApiClient();
                 var diffTask = Task.Run(async () => 
-                    await apiClient.GetDiffAsync(projectId, baseCommit, targetCommit));
-                var diffResult = diffTask.Result;
+                    await ApiClient.Instance.GetDiffAsync(projectId, baseCommit, targetCommit));
+                var diffResult = diffTask.GetAwaiter().GetResult();
 
                 if (diffResult == null)
                 {
@@ -213,9 +291,6 @@ namespace RevitVersionControl.Commands
                     // Load diff results into pane
                     diffPane.Show();
                 }
-
-                // Highlight changed elements in viewport
-                // (would be implemented in visual diff service)
 
                 TaskDialog.Show("Diff Results", 
                     $"Added: {diffResult.Summary["added"]}\n" +
@@ -239,6 +314,11 @@ namespace RevitVersionControl.Commands
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            // Settings might be allowed even if logged out? Or maybe only logged in.
+            // Let's restrict it for safety.
+            if (!ApiClient.Instance.IsLoggedIn)
+                return Result.Cancelled;
+
             try
             {
                 var settingsDialog = new SettingsDialog();
