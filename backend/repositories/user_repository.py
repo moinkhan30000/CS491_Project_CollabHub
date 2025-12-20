@@ -29,5 +29,7 @@ class UserRepository:
             return session.exec(statement).first()
 
     def get_user_by_id(self, user_id: str) -> Optional[User]:
+        """Find a user by ID"""
         with Session(engine) as session:
             return session.get(User, user_id)
+
