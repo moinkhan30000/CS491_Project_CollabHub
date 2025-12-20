@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from sqlmodel import SQLModel, Field, JSON, Column
+from typing import Optional
+from sqlmodel import SQLModel, Field
 
 # 1. Base Class: Shared fields (No table=True here)
 class CommitBase(SQLModel):
@@ -12,10 +12,11 @@ class CommitBase(SQLModel):
     parentCommit: Optional[str] = Field(default=None, foreign_key="commit.commitId")
     elementCount: int
     changedElements: int
+    changeType: str = Field(default="MOD") # ADD, MOD, DEL
 
-# 2. Database Table: Inherits Base + adds Primary Key and JSON Column
+# 2. Database Table: Inherits Base + adds Primary Key
 class Commit(CommitBase, table=True):
     commitId: str = Field(primary_key=True)
     
-    # The JSON Blob column (Only exists in the DB version)
-    snapshot: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
+    # Pointer to Object Storage (S3/Blob) instead of JSON blob
+    storageUrl: str

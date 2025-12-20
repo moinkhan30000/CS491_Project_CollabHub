@@ -1,57 +1,114 @@
-"""
-Projects Router
-"""
-
-from fastapi import APIRouter, HTTPException, status
-from typing import List
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Depends
+from fastapi.responses import FileResponse
+from typing import List, Optional
 from schemas.project_schema import ProjectCreate
 from entities.project_entity import Project
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
+from repositories.project_member_repository import ProjectMemberRepository
+from repositories.user_repository import UserRepository
+from services.storage import StorageService
+import shutil
+import os
 
 router = APIRouter()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
+member_repo = ProjectMemberRepository()
+user_repo = UserRepository()
+storage_service = StorageService()
 
-@router.get("/", response_model=dict)
-async def list_projects():
-    """List all projects"""
-    projects = project_repo.list_projects()
-    return {"projects": projects}
+# --- INITIALIZATION ---
 
-@router.post("/", response_model=Project, status_code=status.HTTP_201_CREATED)
-async def create_project(project_data: ProjectCreate):
-    """Create a new project"""
+@router.post("/init", status_code=status.HTTP_201_CREATED)
+async def init_project(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    file: UploadFile = File(...)
+):
+    """
+    Initialize a new project:
+    1. Create Project
+    2. Upload Initial File
+    3. Create Initial Commit
+    4. Set Owner
+    """
+    # TODO: Get actual user ID from Auth Token
+    user_id = "default-user" 
     
-    # In production, get user_id from JWT token
-    user_id = "default-user"
+    # 1. Create Project
+    project = project_repo.create_project(name, description, created_by=user_id)
     
-    project = project_repo.create_project(
-        name=project_data.name,
-        description=project_data.description,
-        created_by=user_id
+    # 2. Upload File (Use commit ID as filename, so we need a commit ID first... 
+    # actually storage service handles naming if we pass commit ID, let's generate one or let logic handle it)
+    # Let's create a placeholder commit ID for the initial upload
+    # Wait, StorageService logic uses commit_id. We need to generate one.
+    # Simple workaround: Create commit first? No, need storageUrl.
+    # Solution: Generate a UUID here or let storage service handle it.
+    # Let's assume generic "v1" for now or use a temp UUID.
+    import uuid
+    commit_uuid = str(uuid.uuid4())
+    
+    storage_url = await storage_service.upload_file(file, project.projectId, commit_uuid)
+    
+    # 3. Create Initial Commit
+    commit_repo.create_commit(
+        project_id=project.projectId,
+        model_id="init",
+        message="Initial Commit",
+        author=user_id,
+        storage_url=storage_url,
+        change_type="ADD"
     )
     
-    return project
+    # 4. Set Owner
+    member_repo.add_member(project.projectId, user_id, role="OWNER", status="ACTIVE")
+    
+    return {"projectId": project.projectId, "name": project.name, "status": "Initialized"}
 
-@router.get("/{project_id}", response_model=dict)
-async def get_project(project_id: str):
-    """Get project details"""
+# --- INVITATIONS ---
+
+@router.post("/{project_id}/invite")
+async def invite_user(project_id: str, email: str):
+    """Invite a user to the project by email"""
+    user = user_repo.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Check if already member
+    existing = member_repo.get_member(project_id, user.userId)
+    if existing:
+        raise HTTPException(status_code=400, detail="User is already a member or invited")
+        
+    member_repo.add_member(project_id, user.userId, role="COLLABORATOR", status="PENDING")
+    return {"message": f"Invitation sent to {email}"}
+
+@router.get("/invitations/pending")
+async def get_pending_invites():
+    # TODO: Get actual user ID
+    user_id = "default-user" 
+    return member_repo.get_pending_invites(user_id)
+
+@router.post("/invitations/{invite_id}/respond")
+async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or DECLINED
+    """
+    Accept or Decline invitation.
+    If ACCEPTED, returns the latest project file.
+    """
+    member = member_repo.update_status(invite_id, status)
+    if not member:
+         raise HTTPException(status_code=404, detail="Invitation not found")
+         
+    if status == "ACTIVE":
+        # Auto-Download Logic
+        latest_commit = commit_repo.get_latest_commit(member.projectId)
+        if latest_commit and latest_commit.storageUrl:
+            file_path = storage_service.get_file_path(latest_commit.storageUrl)
+            if file_path.exists():
+                return FileResponse(
+                    path=file_path, 
+                    filename=f"{member.projectId}.rvt", 
+                    media_type='application/octet-stream'
+                )
     
-    project = project_repo.get_project(project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    commit_count = commit_repo.get_commit_count(project_id)
-    
-    return {
-        **project.model_dump(),
-        "statistics": {
-            "totalCommits": commit_count,
-            "totalElements": 0,  # Would compute from latest snapshot
-            "storageUsed": 0
-        }
-    }
+    return {"status": status, "message": "Invitation updated"}
