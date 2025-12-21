@@ -72,11 +72,15 @@ class Geometry(BaseModel):
     solids: Optional[List[Dict[str, float]]] = None
 
 class Location(BaseModel):
-    type: Literal["point", "curve"]
+    type: Literal["point", "curve", "transform"]
     point: Optional[Point3D] = None
     rotation: Optional[float] = None
     startPoint: Optional[Point3D] = None
     endPoint: Optional[Point3D] = None
+    origin: Optional[Point3D] = None
+    basisX: Optional[Point3D] = None
+    basisY: Optional[Point3D] = None
+    basisZ: Optional[Point3D] = None
 
 class Element(BaseModel):
     id: str  # Revit UniqueId

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System.IO;
 
 namespace RevitVersionControl.Services
 {
@@ -84,6 +86,54 @@ namespace RevitVersionControl.Services
         public async Task<ElementSnapshot> GetSnapshotAsync(string projectId, string commitId)
         {
             return await GetAsync<ElementSnapshot>($"/projects/{projectId}/commits/{commitId}/snapshot");
+        }
+
+        // ========== Base File Operations ==========
+
+        public async Task<BaseFileStatus> GetBaseFileStatusAsync(string projectId, string modelId)
+        {
+            string encodedModelId = Uri.EscapeDataString(modelId ?? string.Empty);
+            return await GetAsync<BaseFileStatus>($"/projects/{projectId}/base-file/status?modelId={encodedModelId}");
+        }
+
+        public async Task<bool> UploadBaseFileAsync(string projectId, string modelId, string filePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                {
+                    LastError = "Base file path is invalid or missing.";
+                    return false;
+                }
+
+                string encodedModelId = Uri.EscapeDataString(modelId ?? string.Empty);
+                string endpoint = $"/projects/{projectId}/base-file?modelId={encodedModelId}";
+
+                using (var form = new MultipartFormDataContent())
+                using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var fileContent = new StreamContent(fileStream))
+                {
+                    fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    form.Add(fileContent, "file", Path.GetFileName(filePath));
+
+                    var response = await _httpClient.PostAsync(_baseUrl + endpoint, form);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        LastError = $"HTTP {(int)response.StatusCode}: {responseContent}";
+                        return false;
+                    }
+                }
+
+                LastError = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+                Console.WriteLine($"Base file upload failed: {ex.Message}");
+                return false;
+            }
         }
 
         // ========== Diff Operations ==========
@@ -265,6 +315,15 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("parentCommit")]
         public string ParentCommit { get; set; }
+    }
+
+    public class BaseFileStatus
+    {
+        [JsonProperty("exists")]
+        public bool Exists { get; set; }
+
+        [JsonProperty("fileName")]
+        public string FileName { get; set; }
     }
 
     public class DiffResult

@@ -10,13 +10,16 @@ namespace RevitVersionControl.UI
     {
         public string CommitMessage { get; private set; }
         public string SelectedProjectId { get; private set; }
+        public string ModelPath { get; }
 
         private readonly ApiClient _apiClient = new ApiClient();
 
-        public PublishDialog()
+        public PublishDialog(string modelPath)
         {
             InitializeComponent();
+            ModelPath = modelPath;
             Loaded += PublishDialog_Loaded;
+            ProjectComboBox.SelectionChanged += ProjectComboBox_SelectionChanged;
         }
 
         private async void PublishDialog_Loaded(object sender, RoutedEventArgs e)
@@ -35,6 +38,7 @@ namespace RevitVersionControl.UI
                 if (projects.Count > 0)
                 {
                     ProjectComboBox.SelectedIndex = 0;
+                    await UpdateBaseFileStatusAsync(projects[0].ProjectId);
                 }
                 else
                 {
@@ -50,6 +54,42 @@ namespace RevitVersionControl.UI
             finally
             {
                 ProjectComboBox.IsEnabled = true;
+            }
+        }
+
+        private async void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                await UpdateBaseFileStatusAsync(project.ProjectId);
+            }
+        }
+
+        private async Task UpdateBaseFileStatusAsync(string projectId)
+        {
+            BaseFileStatusText.Text = "Base file: checking...";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(ModelPath))
+                {
+                    BaseFileStatusText.Text = "Base file: document not saved";
+                    return;
+                }
+
+                var status = await _apiClient.GetBaseFileStatusAsync(projectId, ModelPath);
+                if (status == null)
+                {
+                    BaseFileStatusText.Text = "Base file: status unavailable";
+                    return;
+                }
+
+                BaseFileStatusText.Text = status.Exists
+                    ? "Base file: present"
+                    : "Base file: missing (will upload on publish)";
+            }
+            catch
+            {
+                BaseFileStatusText.Text = "Base file: status unavailable";
             }
         }
 

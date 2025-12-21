@@ -21,7 +21,7 @@ namespace RevitVersionControl.Commands
                 Document doc = uiApp.ActiveUIDocument.Document;
 
                 // Show publish dialog
-                var publishDialog = new PublishDialog();
+                var publishDialog = new PublishDialog(doc.PathName);
                 var result = publishDialog.ShowDialog();
 
                 if (result != true)
@@ -29,6 +29,41 @@ namespace RevitVersionControl.Commands
 
                 string commitMessage = publishDialog.CommitMessage;
                 string projectId = publishDialog.SelectedProjectId;
+
+                if (string.IsNullOrWhiteSpace(doc.PathName) || !System.IO.File.Exists(doc.PathName))
+                {
+                    TaskDialog.Show("Error", "Please save the document to disk before publishing.");
+                    return Result.Failed;
+                }
+
+                var apiClient = new ApiClient();
+                var baseStatusTask = Task.Run(async () =>
+                    await apiClient.GetBaseFileStatusAsync(projectId, doc.PathName));
+                var baseStatus = baseStatusTask.Result;
+
+                if (baseStatus == null)
+                {
+                    TaskDialog.Show("Error",
+                        string.IsNullOrWhiteSpace(apiClient.LastError)
+                            ? "Failed to check base file status."
+                            : $"Failed to check base file status.\n\n{apiClient.LastError}");
+                    return Result.Failed;
+                }
+
+                if (!baseStatus.Exists)
+                {
+                    var uploadTask = Task.Run(async () =>
+                        await apiClient.UploadBaseFileAsync(projectId, doc.PathName, doc.PathName));
+                    bool uploaded = uploadTask.Result;
+                    if (!uploaded)
+                    {
+                        TaskDialog.Show("Error",
+                            string.IsNullOrWhiteSpace(apiClient.LastError)
+                                ? "Failed to upload base file."
+                                : $"Failed to upload base file.\n\n{apiClient.LastError}");
+                        return Result.Failed;
+                    }
+                }
 
                 // Extract elements
                 var extractor = new ElementExtractor(doc);
@@ -54,7 +89,6 @@ namespace RevitVersionControl.Commands
                 };
 
                 // Publish to server
-                var apiClient = new ApiClient();
                 var publishTask = Task.Run(async () => await apiClient.PublishSnapshotAsync(projectId, snapshot));
                 var commit = publishTask.Result;
 

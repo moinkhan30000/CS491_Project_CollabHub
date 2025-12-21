@@ -68,6 +68,11 @@ namespace RevitVersionControl.Services
 
                 try
                 {
+                    if (extractionOptions.LogProgress)
+                    {
+                        LogProgress($"Inspecting {DescribeElement(element)}");
+                    }
+
                     var elementData = ExtractElement(element, extractionOptions.IncludeGeometry);
                     if (elementData != null)
                     {
@@ -114,6 +119,16 @@ namespace RevitVersionControl.Services
         {
             if (element == null)
                 return null;
+
+            if (element is RevitLinkInstance linkInstance)
+            {
+                return ExtractLinkElement(linkInstance);
+            }
+
+            if (IsMinimalElement(element))
+            {
+                return ExtractMinimalElement(element);
+            }
 
             var parameters = ExtractParameters(element);
             var location = ExtractLocation(element);
@@ -428,6 +443,95 @@ namespace RevitVersionControl.Services
             return false;
         }
 
+        private bool IsMinimalElement(Element element)
+        {
+            if (element == null)
+                return false;
+
+            if (element is Material)
+                return true;
+
+            string category = element.Category?.Name ?? string.Empty;
+            if (category == "RVT Links" || category == "Materials")
+                return true;
+
+            string typeName = element.GetType().Name ?? string.Empty;
+            if (category.Length == 0 && (typeName == "Element" || typeName == "Family" || typeName == "GraphicsStyle"))
+                return true;
+
+            return false;
+        }
+
+        private JObject ExtractMinimalElement(Element element)
+        {
+            return new JObject
+            {
+                ["id"] = element.UniqueId,
+                ["category"] = element.Category?.Name ?? "Unknown",
+                ["type"] = element.GetType().Name ?? "Unknown",
+                ["name"] = element.Name ?? "Unknown",
+                ["parameters"] = new JObject(),
+                ["location"] = null,
+                ["geometry"] = null
+            };
+        }
+
+        private JObject ExtractLinkElement(RevitLinkInstance linkInstance)
+        {
+            JObject location = null;
+
+            try
+            {
+                Transform transform = linkInstance.GetTotalTransform();
+                if (transform != null)
+                {
+                    location = new JObject
+                    {
+                        ["type"] = "transform",
+                        ["origin"] = new JObject
+                        {
+                            ["x"] = transform.Origin.X,
+                            ["y"] = transform.Origin.Y,
+                            ["z"] = transform.Origin.Z
+                        },
+                        ["basisX"] = new JObject
+                        {
+                            ["x"] = transform.BasisX.X,
+                            ["y"] = transform.BasisX.Y,
+                            ["z"] = transform.BasisX.Z
+                        },
+                        ["basisY"] = new JObject
+                        {
+                            ["x"] = transform.BasisY.X,
+                            ["y"] = transform.BasisY.Y,
+                            ["z"] = transform.BasisY.Z
+                        },
+                        ["basisZ"] = new JObject
+                        {
+                            ["x"] = transform.BasisZ.X,
+                            ["y"] = transform.BasisZ.Y,
+                            ["z"] = transform.BasisZ.Z
+                        }
+                    };
+                }
+            }
+            catch
+            {
+                location = null;
+            }
+
+            return new JObject
+            {
+                ["id"] = linkInstance.UniqueId,
+                ["category"] = linkInstance.Category?.Name ?? "RVT Links",
+                ["type"] = linkInstance.GetType().Name ?? "RevitLinkInstance",
+                ["name"] = linkInstance.Name ?? "Link",
+                ["parameters"] = new JObject(),
+                ["location"] = location,
+                ["geometry"] = null
+            };
+        }
+
         private static void LogProgress(string message)
         {
             try
@@ -443,6 +547,21 @@ namespace RevitVersionControl.Services
             {
                 // Ignore logging failures
             }
+        }
+
+        private static string DescribeElement(Element element)
+        {
+            if (element == null)
+            {
+                return "null element";
+            }
+
+            string category = element.Category?.Name ?? "UnknownCategory";
+            string typeName = element.GetType().Name ?? "UnknownType";
+            string name = element.Name ?? "UnknownName";
+            string uniqueId = element.UniqueId ?? "UnknownId";
+
+            return $"Id={element.Id.Value} UniqueId={uniqueId} Category={category} Type={typeName} Name={name}";
         }
     }
 }

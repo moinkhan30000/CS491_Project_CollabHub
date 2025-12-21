@@ -16,6 +16,8 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,15">
             <Label Content="Select Project:" FontWeight="Bold"/>
             <ComboBox Name="ProjectComboBox" Height="30" DisplayMemberPath="Name"/>
+            <TextBlock Name="BaseFileStatusText" Margin="0,8,0,0" Foreground="#666666"
+                       Text="Base file: unknown"/>
         </StackPanel>
 
         <!-- Commit Message -->
