@@ -3,7 +3,7 @@ Pydantic models for request/response validation
 """
 
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Dict, Optional, Any, Literal
+from typing import List, Dict, Optional, Any, Literal, Union
 from datetime import datetime
 from sqlmodel import SQLModel, Field, JSON, Column
 
@@ -104,6 +104,10 @@ class ElementSnapshot(BaseModel):
 
 # ============= Commit Models =============
 
+class AuthorInfo(BaseModel):
+    userId: str
+    fullName: str
+
 # 1. Base Class: Shared fields (No table=True here)
 class CommitBase(SQLModel):
     projectId: str = Field(foreign_key="project.projectId", index=True)
@@ -132,12 +136,14 @@ class CommitCreate(BaseModel):
 # 4. Response/Detail Model: Inherits Base (NOT Table) + adds extra fields
 class CommitDetail(CommitBase):
     commitId: str
+    author: Union[AuthorInfo, str, Dict[str, Any]]
     children: List[str] = []
     summary: Dict[str, int]
     # We deliberately exclude 'snapshot' here to keep the response light
 
 class CommitSummary(CommitBase):
     commitId: str
+    author: Union[AuthorInfo, str, Dict[str, Any]]
 
 # ============= Diff Models =============
 

@@ -32,7 +32,14 @@ namespace RevitVersionControl.Commands
 
                 // Extract elements
                 var extractor = new ElementExtractor(doc);
-                var elementData = extractor.ExtractAllElements();
+                var extractionOptions = new ExtractionOptions
+                {
+                    BatchSize = 200,
+                    PauseMilliseconds = 10,
+                    IncludeGeometry = true,
+                    LogProgress = true
+                };
+                var elementData = extractor.ExtractAllElements(extractionOptions);
 
                 // Create snapshot
                 var snapshot = new ElementSnapshot

@@ -55,8 +55,16 @@ async def create_snapshot(project_id: str, commit_data: CommitCreate):
         parent_commit=parent_commit_id,
         changed_elements=changed_elements
     )
-    
-    return CommitSummary(**commit.model_dump(exclude={"snapshot"}))
+    author_info = storage.get_user_by_id(user_id)
+    author_payload = {
+        "userId": user_id,
+        "fullName": author_info.fullName if author_info else (commit_data.snapshot.userName or "Unknown")
+    }
+
+    commit_dict = commit.model_dump(exclude={"snapshot"})
+    commit_dict["author"] = author_payload
+
+    return CommitSummary(**commit_dict)
 
 @router.get("/{project_id}/commits", response_model=dict)
 async def list_commits(
@@ -85,11 +93,10 @@ async def list_commits(
         # when just listing the history.
         commit_dict = commit.model_dump(exclude={"snapshot"})
         user = storage.get_user_by_id(commit.author)
-        if user:
-            commit_dict["author"] = {
-                "userId": user.userId,
-                "fullName": user.fullName
-            }
+        commit_dict["author"] = {
+            "userId": commit.author,
+            "fullName": user.fullName if user else "Unknown"
+        }
         enriched_commits.append(commit_dict)
     
     return {

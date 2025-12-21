@@ -1,15 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json.Linq;
 
 namespace RevitVersionControl.Services
 {
+    public class ExtractionOptions
+    {
+        public int BatchSize { get; set; } = 200;
+        public int PauseMilliseconds { get; set; } = 10;
+        public bool IncludeGeometry { get; set; } = true;
+        public bool LogProgress { get; set; } = true;
+    }
+
     /// <summary>
     /// Extracts element-level data from Revit model
     /// Converts elements to JSON-serializable format
@@ -28,12 +38,27 @@ namespace RevitVersionControl.Services
         /// </summary>
         public List<JObject> ExtractAllElements()
         {
+            return ExtractAllElements(new ExtractionOptions());
+        }
+
+        /// <summary>
+        /// Extract all elements with configurable throttling/logging options
+        /// </summary>
+        public List<JObject> ExtractAllElements(ExtractionOptions options)
+        {
             var elements = new List<JObject>();
+            var extractionOptions = options ?? new ExtractionOptions();
+            int processed = 0;
 
             // Get all model elements (excluding views, sheets, etc.)
             FilteredElementCollector collector = new FilteredElementCollector(_document)
                 .WhereElementIsNotElementType()
                 .WhereElementIsViewIndependent();
+
+            if (extractionOptions.LogProgress)
+            {
+                LogProgress($"Extraction started. Element count: {collector.GetElementCount()}");
+            }
 
             foreach (Element element in collector)
             {
@@ -43,7 +68,7 @@ namespace RevitVersionControl.Services
 
                 try
                 {
-                    var elementData = ExtractElement(element);
+                    var elementData = ExtractElement(element, extractionOptions.IncludeGeometry);
                     if (elementData != null)
                     {
                         elements.Add(elementData);
@@ -53,7 +78,30 @@ namespace RevitVersionControl.Services
                 {
                     // Log error but continue processing
                     Console.WriteLine($"Failed to extract element {element.Id}: {ex.Message}");
+                    if (extractionOptions.LogProgress)
+                    {
+                        LogProgress($"Failed element {element.Id} ({element.UniqueId}): {ex.Message}");
+                    }
                 }
+
+                processed++;
+                if (extractionOptions.BatchSize > 0 && processed % extractionOptions.BatchSize == 0)
+                {
+                    if (extractionOptions.LogProgress)
+                    {
+                        LogProgress($"Processed {processed} elements. Last: {element.Id} ({element.UniqueId})");
+                    }
+
+                    if (extractionOptions.PauseMilliseconds > 0)
+                    {
+                        Thread.Sleep(extractionOptions.PauseMilliseconds);
+                    }
+                }
+            }
+
+            if (extractionOptions.LogProgress)
+            {
+                LogProgress($"Extraction completed. Extracted {elements.Count} elements.");
             }
 
             return elements;
@@ -62,7 +110,7 @@ namespace RevitVersionControl.Services
         /// <summary>
         /// Extract data from a single element
         /// </summary>
-        public JObject ExtractElement(Element element)
+        public JObject ExtractElement(Element element, bool includeGeometry)
         {
             if (element == null)
                 return null;
@@ -81,7 +129,7 @@ namespace RevitVersionControl.Services
                 ["type"] = GetElementTypeName(element),
                 ["parameters"] = parameters,
                 ["location"] = location,
-                ["geometry"] = ExtractGeometry(element, location)
+                ["geometry"] = includeGeometry ? ExtractGeometry(element, location) : null
             };
 
             var typeInfo = GetElementTypeInfo(element);
@@ -181,16 +229,6 @@ namespace RevitVersionControl.Services
 
             try
             {
-                Options options = new Options
-                {
-                    ComputeReferences = false,
-                    DetailLevel = ViewDetailLevel.Coarse
-                };
-
-                GeometryElement geomElement = element.get_Geometry(options);
-                if (geomElement == null)
-                    return geometryData;
-
                 BoundingBoxXYZ bbox = element.get_BoundingBox(null);
                 if (bbox != null)
                 {
@@ -388,6 +426,23 @@ namespace RevitVersionControl.Services
                 return true;
 
             return false;
+        }
+
+        private static void LogProgress(string message)
+        {
+            try
+            {
+                var baseDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "RevitVersionControl");
+                Directory.CreateDirectory(baseDir);
+                var path = Path.Combine(baseDir, "extractor.log");
+                File.AppendAllText(path, $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
+            }
+            catch
+            {
+                // Ignore logging failures
+            }
         }
     }
 }
