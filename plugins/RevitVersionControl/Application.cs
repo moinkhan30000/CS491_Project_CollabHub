@@ -99,6 +99,24 @@ namespace RevitVersionControl
                     "Configure version control settings");
                 RestrictedButtons.Add(settingsBtn);
 
+                panel.AddSeparator();
+
+                // Collaboration Buttons
+                var initBtn = AddPushButton(panel, "Init", "Initialize\nProject", 
+                    typeof(Commands.InitProjectCommand), "InitCommand.png", 
+                    "Initialize version control for this project");
+                RestrictedButtons.Add(initBtn);
+
+                var inviteBtn = AddPushButton(panel, "Invite", "Invite\nCollaborators", 
+                    typeof(Commands.InviteCommand), "InviteCommand.png", 
+                    "Invite other users to this project");
+                RestrictedButtons.Add(inviteBtn);
+
+                var invitesBtn = AddPushButton(panel, "Invites", "My\nInvitations", 
+                    typeof(Commands.InvitationsCommand), "InvitationsCommand.png", 
+                    "Manage your project invitations");
+                RestrictedButtons.Add(invitesBtn);
+
                 // Initialize state
                 SetLoggedInState(false);
 

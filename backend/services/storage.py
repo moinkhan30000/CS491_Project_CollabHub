@@ -3,8 +3,9 @@ import shutil
 from fastapi import UploadFile
 from pathlib import Path
 
-# Data directory mapped to Docker volume
-DATA_DIR = Path("/app/data")
+# Data directory - use environment variable or fallback to local directory
+# In Docker: DATA_DIR=/app/data, Local: uses ./data relative to backend
+DATA_DIR = Path(os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data")))
 
 class StorageService:
     def __init__(self):

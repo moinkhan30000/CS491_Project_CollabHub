@@ -25,6 +25,7 @@ namespace RevitVersionControl.Services
         {
             _baseUrl = baseUrl;
             _httpClient = new HttpClient();
+            _httpClient.Timeout = TimeSpan.FromSeconds(120); // 2 minute timeout for large file uploads
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
         }
 
@@ -96,6 +97,81 @@ namespace RevitVersionControl.Services
         {
             var payload = new { name, description };
             return await PostAsync<Project>("/projects", payload);
+        }
+
+        public async Task<Project> InitProjectAsync(string name, string filePath)
+        {
+                using (var content = new MultipartFormDataContent())
+                {
+                    content.Add(new StringContent(name), "name");
+                    
+                // Copy file to memory stream using FileShare.ReadWrite to allow reading open files
+                    using (var fileStream = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))
+                    {
+                        var memoryStream = new System.IO.MemoryStream();
+                        await fileStream.CopyToAsync(memoryStream).ConfigureAwait(false);
+                        memoryStream.Position = 0;
+
+                        var fileContent = new ByteArrayContent(memoryStream.ToArray());
+                        fileContent.Headers.Add("Content-Type", "application/octet-stream");
+                        content.Add(fileContent, "file", System.IO.Path.GetFileName(filePath));
+
+                        var response = await _httpClient.PostAsync(_baseUrl + "/projects/init", content).ConfigureAwait(false);
+                        
+                        // Check status manually to give better error on 404/500
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            throw new HttpRequestException($"Server Error {response.StatusCode}: {errorContent}");
+                        }
+
+                        var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        return JsonConvert.DeserializeObject<Project>(responseContent);
+                    }
+                }
+        }
+
+        public async Task<bool> InviteUserAsync(string projectId, string email)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsync($"{_baseUrl}/projects/{projectId}/invite?email={Uri.EscapeDataString(email)}", null);
+                if (response.IsSuccessStatusCode) return true;
+                return false;
+            }
+            catch { return false; }
+        }
+
+        public async Task<List<Invite>> GetPendingInvitesAsync()
+        {
+            var response = await GetAsync<List<Invite>>("/projects/invitations/pending");
+            return response ?? new List<Invite>();
+        }
+
+        public async Task<string> RespondToInviteAsync(int inviteId, string status, string savePath = null)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsync($"{_baseUrl}/projects/invitations/{inviteId}/respond?status={status}", null);
+                response.EnsureSuccessStatusCode();
+
+                if (status == "ACTIVE" && !string.IsNullOrEmpty(savePath))
+                {
+                    // If accepted, we expect a file stream
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new System.IO.FileStream(savePath, System.IO.FileMode.Create))
+                    {
+                        await stream.CopyToAsync(fileStream);
+                    }
+                    return savePath;
+                }
+                
+                return "Success";
+            }
+            catch (Exception ex)
+            {
+                return $"Error: {ex.Message}";
+            }
         }
 
         // ========== Snapshots & Commits ==========
@@ -171,10 +247,11 @@ namespace RevitVersionControl.Services
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 
-                var response = await _httpClient.PostAsync(_baseUrl + endpoint, content);
+                // PostAsync
+                var response = await _httpClient.PostAsync(_baseUrl + endpoint, content).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
-                
-                var responseContent = await response.Content.ReadAsStringAsync();
+
+                var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 return JsonConvert.DeserializeObject<T>(responseContent);
             }
             catch (Exception ex)
@@ -314,5 +391,19 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("requiresResolution")]
         public bool RequiresResolution { get; set; }
+    }
+
+    public class Invite
+    {
+        [JsonProperty("inviteId")]
+        public int InviteId { get; set; }
+        [JsonProperty("projectId")]
+        public string ProjectId { get; set; }
+        [JsonProperty("projectName")]
+        public string ProjectName { get; set; }
+        [JsonProperty("invitedAt")]
+        public DateTime InvitedAt { get; set; }
+        [JsonProperty("role")]
+        public string Role { get; set; }
     }
 }

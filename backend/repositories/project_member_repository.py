@@ -59,3 +59,25 @@ class ProjectMemberRepository:
                 session.commit()
                 session.refresh(member)
             return member
+
+    def get_user_projects(self, user_id: str) -> List[dict]:
+        """Returns list of projects where user is an ACTIVE member"""
+        with Session(engine) as session:
+            statement = select(ProjectMember, Project).where(
+                ProjectMember.userId == user_id,
+                ProjectMember.status == "ACTIVE",
+                ProjectMember.projectId == Project.projectId
+            )
+            results = session.exec(statement).all()
+            
+            projects = []
+            for member, project in results:
+                projects.append({
+                    "projectId": project.projectId,
+                    "name": project.name,
+                    "description": project.description,
+                    "role": member.role,
+                    "createdAt": project.createdAt,
+                    "lastModified": project.lastModified
+                })
+            return projects

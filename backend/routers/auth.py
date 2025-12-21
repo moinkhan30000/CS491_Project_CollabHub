@@ -50,8 +50,8 @@ def create_refresh_token(user_id: str) -> str:
     
     return token
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Dependency for protected routes"""
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+    """Dependency for protected routes - extracts user from JWT token"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -64,27 +64,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-        
-    user = user_repo.get_user_by_email(user_id) # Wait, sub is usually ID not email? Let's check logic.
-    # In register/login we might have used email or ID?
-    # Original create_access_token used user_id.
-    # get_user_by_email expects email.
+    
+    # JWT 'sub' claim contains userId, so use get_user_by_id
+    user = user_repo.get_user_by_id(user_id)
     
     if user is None:
-        # Try finding by ID if email lookup failed (or if we stored ID in sub)
-        # But repo only has get_user_by_email? Let's assume we need to fix this or implementation.
-        # Actually existing login passed user.userId to create_access_token.
-        # So "sub" contains userId.
-        # We need get_user_by_id in repo?
-        pass # Will fix in next step if repo misses it.
-
-    # Let's check repository below.
-    # For now, let's assume we need to fetch user by ID.
-    # If repo doesn't have it, we'll add it.
-    
-    # Re-reading user_repo... likely need to add get_user_by_id. 
-    # For now, I will assume we should add it.
-    
+        raise credentials_exception
+        
     return user
 
 # Actually, I should check the user_repo first to be safe, but since I'm rewriting this file, 

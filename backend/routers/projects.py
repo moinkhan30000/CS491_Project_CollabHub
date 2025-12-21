@@ -3,11 +3,13 @@ from fastapi.responses import FileResponse
 from typing import List, Optional
 from schemas.project_schema import ProjectCreate
 from entities.project_entity import Project
+from entities.user_entity import User
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from repositories.project_member_repository import ProjectMemberRepository
 from repositories.user_repository import UserRepository
 from services.storage import StorageService
+from dependencies import get_current_user
 import shutil
 import os
 
@@ -18,13 +20,22 @@ member_repo = ProjectMemberRepository()
 user_repo = UserRepository()
 storage_service = StorageService()
 
+# --- LIST PROJECTS ---
+
+@router.get("")
+async def list_projects(current_user: User = Depends(get_current_user)):
+    """List all projects where the current user is an active member"""
+    projects = member_repo.get_user_projects(current_user.userId)
+    return {"projects": projects}
+
 # --- INITIALIZATION ---
 
 @router.post("/init", status_code=status.HTTP_201_CREATED)
 async def init_project(
     name: str = Form(...),
     description: Optional[str] = Form(None),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Initialize a new project:
@@ -33,19 +44,12 @@ async def init_project(
     3. Create Initial Commit
     4. Set Owner
     """
-    # TODO: Get actual user ID from Auth Token
-    user_id = "default-user" 
+    user_id = current_user.userId
     
     # 1. Create Project
     project = project_repo.create_project(name, description, created_by=user_id)
     
-    # 2. Upload File (Use commit ID as filename, so we need a commit ID first... 
-    # actually storage service handles naming if we pass commit ID, let's generate one or let logic handle it)
-    # Let's create a placeholder commit ID for the initial upload
-    # Wait, StorageService logic uses commit_id. We need to generate one.
-    # Simple workaround: Create commit first? No, need storageUrl.
-    # Solution: Generate a UUID here or let storage service handle it.
-    # Let's assume generic "v1" for now or use a temp UUID.
+    # 2. Upload File
     import uuid
     commit_uuid = str(uuid.uuid4())
     
@@ -84,10 +88,9 @@ async def invite_user(project_id: str, email: str):
     return {"message": f"Invitation sent to {email}"}
 
 @router.get("/invitations/pending")
-async def get_pending_invites():
-    # TODO: Get actual user ID
-    user_id = "default-user" 
-    return member_repo.get_pending_invites(user_id)
+async def get_pending_invites(current_user: User = Depends(get_current_user)):
+    """Get pending invitations for the current user"""
+    return member_repo.get_pending_invites(current_user.userId)
 
 @router.post("/invitations/{invite_id}/respond")
 async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or DECLINED

@@ -24,7 +24,7 @@ class CommitRepository:
             commit = Commit(
                 commitId=commit_id,
                 projectId=project_id,
-                model_id=model_id,
+                modelId=model_id,
                 message=message,
                 author=author,
                 timestamp=datetime.utcnow(),
