@@ -50,6 +50,7 @@ namespace RevitVersionControl.Commands
                         {
                             System.Windows.Input.Mouse.OverrideCursor = null;
                             TaskDialog.Show("Success", $"Project '{resultProject.Name}' initialized!");
+                            HistoryPaneProvider.Instance?.ReloadProjects();
                             return Result.Succeeded;
                         }
                         else

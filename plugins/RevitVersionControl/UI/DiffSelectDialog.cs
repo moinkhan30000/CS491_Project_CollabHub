@@ -16,7 +16,7 @@ namespace RevitVersionControl.UI
         private ComboBox ProjectComboBox;
         private ComboBox BaseCommitComboBox;
         private ComboBox TargetCommitComboBox;
-        private readonly ApiClient _apiClient = new ApiClient();
+        private readonly ApiClient _apiClient = ApiClient.Instance;
 
         public DiffSelectDialog()
         {

@@ -9,7 +9,7 @@ namespace RevitVersionControl.UI
 {
     public partial class HistoryPane : Page
     {
-        private readonly ApiClient _apiClient = new ApiClient();
+        private readonly ApiClient _apiClient = ApiClient.Instance;
 
         public HistoryPane()
         {
@@ -29,12 +29,24 @@ namespace RevitVersionControl.UI
                 ProjectComboBox.IsEnabled = false;
                 var projects = await _apiClient.GetProjectsAsync();
                 ProjectComboBox.ItemsSource = projects;
+                ProjectComboBox.DisplayMemberPath = "Name";
+                ProjectComboBox.SelectedValuePath = "ProjectId";
                 if (projects.Count > 0)
                 {
                     ProjectComboBox.SelectedIndex = 0;
                 }
                 else
                 {
+                    if (!string.IsNullOrWhiteSpace(_apiClient.LastError) &&
+                        _apiClient.LastError.Contains("HTTP 401"))
+                    {
+                        CommitListView.ItemsSource = new List<CommitItem>
+                        {
+                            new CommitItem { Message = "Please log in to view projects.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 }
+                        };
+                        return;
+                    }
+
                     CommitListView.ItemsSource = new List<CommitItem>
                     {
                         new CommitItem { Message = "No projects found.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 }
@@ -93,12 +105,14 @@ namespace RevitVersionControl.UI
             }
         }
 
+        public async void ReloadProjects()
+        {
+            await LoadProjectsAsync();
+        }
+
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
-            if (ProjectComboBox.SelectedItem is Project project)
-            {
-                await LoadCommitsAsync(project.ProjectId);
-            }
+            await LoadProjectsAsync();
         }
 
         private async void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

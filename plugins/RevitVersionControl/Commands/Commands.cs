@@ -32,6 +32,7 @@ namespace RevitVersionControl.Commands
                     {
                         // Dialog sets result true only if login/register succeeded
                         Application.SetLoggedInState(true);
+                        HistoryPaneProvider.Instance?.ReloadProjects();
                         TaskDialog.Show("Success", "Logged in successfully!");
                     }
                 }
@@ -63,6 +64,7 @@ namespace RevitVersionControl.Commands
                 {
                     // Register dialog handles auto-login on success
                     Application.SetLoggedInState(true);
+                    HistoryPaneProvider.Instance?.ReloadProjects();
                     TaskDialog.Show("Success", "Account created and logged in!");
                 }
                 return Result.Succeeded;
@@ -174,6 +176,13 @@ namespace RevitVersionControl.Commands
                 }
                 else
                 {
+                    if (!string.IsNullOrWhiteSpace(apiClient.LastError) &&
+                        apiClient.LastError.Contains("No changes detected"))
+                    {
+                        TaskDialog.Show("Up to Date", "No changes detected. Snapshot is already up to date.");
+                        return Result.Succeeded;
+                    }
+
                     var errorDetail = string.IsNullOrWhiteSpace(apiClient.LastError)
                         ? "Failed to publish snapshot to server."
                         : $"Failed to publish snapshot to server.\n\n{apiClient.LastError}";
@@ -314,6 +323,12 @@ namespace RevitVersionControl.Commands
                 string targetCommit = diffDialog.TargetCommitId;
                 string projectId = diffDialog.ProjectId;
 
+                if (baseCommit == targetCommit)
+                {
+                    TaskDialog.Show("No Differences", "Base and target commits are the same.");
+                    return Result.Succeeded;
+                }
+
                 // Get diff from server
                 TaskDialog.Show("Computing Diff", "Comparing versions...");
                 
@@ -323,8 +338,19 @@ namespace RevitVersionControl.Commands
 
                 if (diffResult == null)
                 {
-                    TaskDialog.Show("Error", "Failed to compute diff.");
+                    var errorDetail = string.IsNullOrWhiteSpace(ApiClient.Instance.LastError)
+                        ? "Failed to compute diff."
+                        : $"Failed to compute diff.\n\n{ApiClient.Instance.LastError}";
+                    TaskDialog.Show("Error", errorDetail);
                     return Result.Failed;
+                }
+
+                if (diffResult.Summary != null &&
+                    diffResult.Summary.TryGetValue("total", out int totalChanges) &&
+                    totalChanges == 0)
+                {
+                    TaskDialog.Show("No Differences", "No changes found between the selected commits.");
+                    return Result.Succeeded;
                 }
 
                 // Show diff/merge pane with results

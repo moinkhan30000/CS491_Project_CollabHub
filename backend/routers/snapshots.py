@@ -50,6 +50,11 @@ async def create_snapshot(
                 target_version="new"
             )
             changed_elements = len(diff_result.changes)
+            if changed_elements == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="No changes detected. Snapshot is already up to date."
+                )
 
     commit = commit_repo.create_commit(
         project_id=project_id,
