@@ -12,7 +12,7 @@ namespace RevitVersionControl.UI
         public string SelectedProjectId { get; private set; }
         public string ModelPath { get; }
 
-        private readonly ApiClient _apiClient = new ApiClient();
+        private readonly ApiClient _apiClient = ApiClient.Instance;
 
         public PublishDialog(string modelPath)
         {

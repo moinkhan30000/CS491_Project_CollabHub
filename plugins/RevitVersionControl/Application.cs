@@ -15,6 +15,32 @@ namespace RevitVersionControl
     {
         private const string TabName = "Version Control";
         private const string PanelName = "Revit VC";
+        
+        // Static references to UI elements to control visibility
+        // Static references to UI elements to control visibility
+        public static System.Collections.Generic.List<PushButton> RestrictedButtons { get; private set; } = new System.Collections.Generic.List<PushButton>();
+        public static PushButton LoginButton { get; private set; }
+        public static PushButton RegisterButton { get; private set; }
+
+        public static void SetLoggedInState(bool isLoggedIn)
+        {
+            if (LoginButton != null)
+            {
+                LoginButton.ItemText = isLoggedIn ? "Logout" : "Login";
+                LoginButton.ToolTip = isLoggedIn ? "Logout from CollabHub" : "Login to CollabHub";
+            }
+
+            if (RegisterButton != null)
+            {
+                RegisterButton.Visible = !isLoggedIn;
+            }
+
+            foreach (var btn in RestrictedButtons)
+            {
+                btn.Visible = isLoggedIn;
+                btn.Enabled = isLoggedIn;
+            }
+        }
 
         public Result OnStartup(UIControlledApplication application)
         {
@@ -34,27 +60,65 @@ namespace RevitVersionControl
                 RibbonPanel panel = application.CreateRibbonPanel(TabName, PanelName);
 
                 // Add buttons
-                AddPushButton(panel, "Publish", "Publish\nSnapshot", 
+                
+                // Login/Logout Button (Always Visible)
+                LoginButton = AddPushButton(panel, "Login", "Login", 
+                    typeof(Commands.LoginCommand), "LoginCommand.png", 
+                    "Login to CollabHub");
+
+                // Register Button (Visible only when logged out)
+                RegisterButton = AddPushButton(panel, "Register", "Register", 
+                    typeof(Commands.RegisterCommand), "RegisterCommand.png", 
+                    "Create a new CollabHub account");
+
+                // Restricted Buttons (Initially Hidden)
+                var publishBtn = AddPushButton(panel, "Publish", "Publish\nSnapshot", 
                     typeof(Commands.PublishCommand), "PublishCommand.png", 
                     "Publish current model snapshot to server");
+                RestrictedButtons.Add(publishBtn);
 
-                AddPushButton(panel, "History", "View\nHistory", 
+                var historyBtn = AddPushButton(panel, "History", "View\nHistory", 
                     typeof(Commands.ViewHistoryCommand), "HistoryCommand.png", 
                     "View commit history and branches");
+                RestrictedButtons.Add(historyBtn);
 
-                AddPushButton(panel, "Pull", "Pull\nChanges", 
+                var pullBtn = AddPushButton(panel, "Pull", "Pull\nChanges", 
                     typeof(Commands.PullCommand), "PullCommand.png", 
                     "Pull changes from remote");
+                RestrictedButtons.Add(pullBtn);
 
-                AddPushButton(panel, "Diff", "View\nDiff", 
+                var diffBtn = AddPushButton(panel, "Diff", "View\nDiff", 
                     typeof(Commands.DiffViewCommand), "DiffCommand.png", 
                     "View differences between versions");
+                RestrictedButtons.Add(diffBtn);
 
                 panel.AddSeparator();
 
-                AddPushButton(panel, "Settings", "Settings", 
+                var settingsBtn = AddPushButton(panel, "Settings", "Settings", 
                     typeof(Commands.SettingsCommand), "SettingsCommand.png", 
                     "Configure version control settings");
+                RestrictedButtons.Add(settingsBtn);
+
+                panel.AddSeparator();
+
+                // Collaboration Buttons
+                var initBtn = AddPushButton(panel, "Init", "Initialize\nProject", 
+                    typeof(Commands.InitProjectCommand), "InitCommand.png", 
+                    "Initialize version control for this project");
+                RestrictedButtons.Add(initBtn);
+
+                var inviteBtn = AddPushButton(panel, "Invite", "Invite\nCollaborators", 
+                    typeof(Commands.InviteCommand), "InviteCommand.png", 
+                    "Invite other users to this project");
+                RestrictedButtons.Add(inviteBtn);
+
+                var invitesBtn = AddPushButton(panel, "Invites", "My\nInvitations", 
+                    typeof(Commands.InvitationsCommand), "InvitationsCommand.png", 
+                    "Manage your project invitations");
+                RestrictedButtons.Add(invitesBtn);
+
+                // Initialize state
+                SetLoggedInState(false);
 
                 // Register dockable panes
                 RegisterDockablePanes(application);
@@ -74,7 +138,7 @@ namespace RevitVersionControl
             return Result.Succeeded;
         }
 
-        private void AddPushButton(RibbonPanel panel, string name, string text, 
+        private PushButton AddPushButton(RibbonPanel panel, string name, string text, 
             Type commandType, string _imageName, string tooltip)
         {
             PushButtonData buttonData = new PushButtonData(
@@ -89,6 +153,8 @@ namespace RevitVersionControl
 
             // Set icon (would load actual image in production)
             // button.LargeImage = LoadImage(imageName);
+            
+            return button;
         }
 
         private void RegisterDockablePanes(UIControlledApplication application)

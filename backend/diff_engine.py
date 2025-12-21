@@ -3,7 +3,8 @@ Diff Engine - Core logic for comparing element snapshots
 """
 
 from typing import Dict, List, Set
-from models import Element, Change, ParameterChange, Conflict, DiffResult
+from schemas.element_schema import Element
+from schemas.diff_schema import Change, ParameterChange, Conflict, DiffResult
 from datetime import datetime
 import hashlib
 import json

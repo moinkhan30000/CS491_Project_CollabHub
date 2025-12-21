@@ -2,20 +2,25 @@
 Merge Router
 """
 
-from fastapi import APIRouter, HTTPException, status
-from models import MergeRequest, MergeResult, PullRequest, PullResult
-from storage import storage
+from fastapi import APIRouter, HTTPException, status, Depends
+from entities.user_entity import User
+from dependencies import get_current_user
+from schemas.diff_schema import MergeRequest, MergeResult, PullRequest, PullResult
+from repositories.project_repository import ProjectRepository
+from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine
 
 router = APIRouter()
 diff_engine = DiffEngine()
+project_repo = ProjectRepository()
+commit_repo = CommitRepository()
 
 @router.post("/{project_id}/merge", response_model=MergeResult)
-async def merge_commits(project_id: str, merge_request: MergeRequest):
+async def merge_commits(project_id: str, merge_request: MergeRequest, current_user: User = Depends(get_current_user)):
     """Request a merge operation (3-way merge if possible)"""
     
     # Verify project exists
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -23,9 +28,9 @@ async def merge_commits(project_id: str, merge_request: MergeRequest):
         )
     
     # Get snapshots
-    base_snapshot = storage.get_snapshot(merge_request.baseCommit)
-    source_snapshot = storage.get_snapshot(merge_request.sourceCommit)
-    target_snapshot = storage.get_snapshot(merge_request.targetCommit)
+    base_snapshot = commit_repo.get_snapshot(merge_request.baseCommit)
+    source_snapshot = commit_repo.get_snapshot(merge_request.sourceCommit)
+    target_snapshot = commit_repo.get_snapshot(merge_request.targetCommit)
     
     if not all([base_snapshot, source_snapshot, target_snapshot]):
         raise HTTPException(
@@ -76,11 +81,11 @@ async def merge_commits(project_id: str, merge_request: MergeRequest):
     )
 
 @router.post("/{project_id}/pull", response_model=PullResult)
-async def pull_changes(project_id: str, pull_request: PullRequest):
+async def pull_changes(project_id: str, pull_request: PullRequest, current_user: User = Depends(get_current_user)):
     """Pull changes from a specific commit (simplified merge)"""
     
     # Verify project exists
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -88,8 +93,8 @@ async def pull_changes(project_id: str, pull_request: PullRequest):
         )
     
     # Get snapshots
-    current_snapshot = storage.get_snapshot(pull_request.currentCommit)
-    target_snapshot = storage.get_snapshot(pull_request.targetCommit)
+    current_snapshot = commit_repo.get_snapshot(pull_request.currentCommit)
+    target_snapshot = commit_repo.get_snapshot(pull_request.targetCommit)
     
     if not current_snapshot or not target_snapshot:
         raise HTTPException(

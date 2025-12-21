@@ -9,19 +9,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status, Depends
 from fastapi.responses import FileResponse
 
-from storage import storage
+from entities.user_entity import User
+from repositories.project_repository import ProjectRepository
+from dependencies import get_current_user
 
 router = APIRouter()
+project_repo = ProjectRepository()
+_BASE_DIR = None
 
 def _base_dir() -> Path:
-    root = os.environ.get("BASE_FILE_DIR")
+    global _BASE_DIR
+    if _BASE_DIR is not None:
+        return _BASE_DIR
+    root = os.environ.get("BASE_FILE_DIR") or os.environ.get("DATA_DIR")
     if not root:
-        root = os.path.join(os.getcwd(), "storage", "base_files")
+        root = os.path.join(os.getcwd(), "data")
+    root = os.path.join(root, "base_files")
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
+    _BASE_DIR = path
     return path
 
 def _model_hash(model_id: str) -> str:
@@ -38,8 +47,11 @@ def _find_base_file(project_id: str, model_id: str) -> Optional[Path]:
     matches = list(project_dir.glob(f"{model_key}.*"))
     return matches[0] if matches else None
 
+def find_base_file_path(project_id: str, model_id: str) -> Optional[Path]:
+    return _find_base_file(project_id, model_id)
+
 def _validate_project(project_id: str) -> None:
-    project = storage.get_project(project_id)
+    project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -47,7 +59,11 @@ def _validate_project(project_id: str) -> None:
         )
 
 @router.get("/{project_id}/base-file/status")
-async def base_file_status(project_id: str, modelId: str = Query(...)):
+async def base_file_status(
+    project_id: str,
+    modelId: str = Query(...),
+    current_user: User = Depends(get_current_user)
+):
     _validate_project(project_id)
     existing = _find_base_file(project_id, modelId)
     return {
@@ -59,7 +75,8 @@ async def base_file_status(project_id: str, modelId: str = Query(...)):
 async def upload_base_file(
     project_id: str,
     modelId: str = Query(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
     _validate_project(project_id)
 
@@ -97,7 +114,11 @@ async def upload_base_file(
     }
 
 @router.get("/{project_id}/base-file")
-async def download_base_file(project_id: str, modelId: str = Query(...)):
+async def download_base_file(
+    project_id: str,
+    modelId: str = Query(...),
+    current_user: User = Depends(get_current_user)
+):
     _validate_project(project_id)
     existing = _find_base_file(project_id, modelId)
     if not existing:

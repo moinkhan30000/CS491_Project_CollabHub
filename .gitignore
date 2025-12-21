@@ -17,6 +17,7 @@ __pycache__/
 node_modules/
 
 # Backend storage
+backend/data/
 backend/storage/
 
 
