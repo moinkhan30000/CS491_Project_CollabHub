@@ -4,6 +4,7 @@ import uuid
 from sqlmodel import Session, select
 from database import engine
 from models import User, Project, Commit, ElementSnapshot
+from fastapi.encoders import jsonable_encoder
 
 class Storage:
     """
@@ -81,7 +82,8 @@ class Storage:
         message: str,
         author: str,
         snapshot: ElementSnapshot, # Takes the Pydantic Object
-        parent_commit: Optional[str] = None
+        parent_commit: Optional[str] = None,
+        changed_elements: Optional[int] = None
     ) -> Commit:
         with Session(engine) as session:
             commit_id = str(uuid.uuid4())
@@ -90,7 +92,7 @@ class Storage:
             # We convert the complex Pydantic object (snapshot) into a plain Python Dictionary
             # using .model_dump(). The Database (SQLModel/SQLAlchemy) will automatically 
             # turn this Dict into a JSON string to store it in the "snapshot" column.
-            snapshot_data = snapshot.model_dump()
+            snapshot_data = jsonable_encoder(snapshot)
             
             commit = Commit(
                 commitId=commit_id,
@@ -102,7 +104,7 @@ class Storage:
                 parentCommit=parent_commit,
                 snapshot=snapshot_data, # Saved as JSON
                 elementCount=len(snapshot.elements),
-                changedElements=len(snapshot.elements)
+                changedElements=changed_elements if changed_elements is not None else len(snapshot.elements)
             )
             
             # Update the project's "lastModified" time
@@ -145,6 +147,15 @@ class Storage:
                 .offset(offset)\
                 .limit(limit)
             return session.exec(statement).all()
+
+    def get_latest_commit(self, project_id: str, model_id: Optional[str] = None) -> Optional[Commit]:
+        """Get the most recent commit for a project (optionally filtered by model_id)."""
+        with Session(engine) as session:
+            statement = select(Commit).where(Commit.projectId == project_id)
+            if model_id:
+                statement = statement.where(Commit.modelId == model_id)
+            statement = statement.order_by(Commit.timestamp.desc()).limit(1)
+            return session.exec(statement).first()
 
     def get_commit_count(self, project_id: str) -> int:
         with Session(engine) as session:

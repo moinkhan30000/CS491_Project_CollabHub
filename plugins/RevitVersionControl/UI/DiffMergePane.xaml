@@ -12,13 +12,13 @@ Title="Changes &amp; Merge">
         <!-- Header -->
         <Border Grid.Row="0" Background="#2D2D30" Padding="10">
             <StackPanel>
-                <TextBlock Text="Changes &amp; Merge" FontSize="16" FontWeight="Bold" 
-                Foreground="White" Margin="0,0,0,5"/>
+                <TextBlock Text="Changes &amp; Merge" FontSize="16" FontWeight="Bold"
+                           Foreground="White" Margin="0,0,0,5"/>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Base: " Foreground="White" VerticalAlignment="Center"/>
-                    <TextBlock Text="commit-abc123" Foreground="LightGray" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="→ Target: " Foreground="White" VerticalAlignment="Center"/>
-                    <TextBlock Text="commit-def456" Foreground="LightGray" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="BaseCommitText" Text="-" Foreground="LightGray" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="Target: " Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TargetCommitText" Text="-" Foreground="LightGray" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -34,11 +34,11 @@ Title="Changes &amp; Merge">
             <Border Grid.Row="0" Background="#F0F0F0" Padding="10" BorderThickness="0,0,0,1" BorderBrush="#CCC">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Added: " FontWeight="Bold"/>
-                    <TextBlock Text="5" Foreground="Green" Margin="0,0,15,0"/>
+                    <TextBlock x:Name="AddedCountText" Text="0" Foreground="Green" Margin="0,0,15,0"/>
                     <TextBlock Text="Modified: " FontWeight="Bold"/>
-                    <TextBlock Text="7" Foreground="Orange" Margin="0,0,15,0"/>
+                    <TextBlock x:Name="ModifiedCountText" Text="0" Foreground="Orange" Margin="0,0,15,0"/>
                     <TextBlock Text="Deleted: " FontWeight="Bold"/>
-                    <TextBlock Text="2" Foreground="Red"/>
+                    <TextBlock x:Name="DeletedCountText" Text="0" Foreground="Red"/>
                 </StackPanel>
             </Border>
 
@@ -55,17 +55,17 @@ Title="Changes &amp; Merge">
                                 </Grid.ColumnDefinitions>
 
                                 <CheckBox Grid.Column="0" IsChecked="True" VerticalAlignment="Center"/>
-                                
-                                <Border Grid.Column="1" Width="40" Height="20" CornerRadius="3" 
+
+                                <Border Grid.Column="1" Width="40" Height="20" CornerRadius="3"
                                         Background="{Binding StatusColor}" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding ChangeType}" Foreground="White" 
+                                    <TextBlock Text="{Binding ChangeType}" Foreground="White"
                                                FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
 
                                 <StackPanel Grid.Column="2" Margin="10,0,0,0">
                                     <TextBlock Text="{Binding ElementType}" FontWeight="Bold"/>
                                     <TextBlock Text="{Binding Description}" FontSize="11" Foreground="Gray"/>
-                                    <TextBlock Text="{Binding Details}" FontSize="10" Foreground="DarkGray" 
+                                    <TextBlock Text="{Binding Details}" FontSize="10" Foreground="DarkGray"
                                                TextWrapping="Wrap" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
@@ -80,9 +80,9 @@ Title="Changes &amp; Merge">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0"/>
                 <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0"/>
-                <Button Content="Highlight in View" Width="120" Height="30" Margin="0,0,15,0" 
+                <Button Content="Highlight in View" Width="120" Height="30" Margin="0,0,15,0"
                         Background="#FFD700"/>
-                <Button Content="Apply Selected" Width="120" Height="30" 
+                <Button Content="Apply Selected" Width="120" Height="30"
                         Background="#28A745" Foreground="White" FontWeight="Bold"/>
             </StackPanel>
         </Border>

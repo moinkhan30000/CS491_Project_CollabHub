@@ -1,47 +1,121 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using RevitVersionControl.Services;
 
 namespace RevitVersionControl.UI
 {
     public partial class HistoryPane : Page
     {
+        private readonly ApiClient _apiClient = new ApiClient();
+
         public HistoryPane()
         {
             InitializeComponent();
-            LoadCommits();
+            Loaded += HistoryPane_Loaded;
         }
 
-        private void LoadCommits()
+        private async void HistoryPane_Loaded(object sender, RoutedEventArgs e)
         {
-            // Load commits from API
-            // For demo, add sample data
-            CommitListView.Items.Add(new
-            {
-                Message = "Added conference room walls",
-                CommitId = "abc123",
-                Author = "John Doe",
-                Timestamp = "2025-12-03 10:30",
-                ChangedElements = 25
-            });
+            await LoadProjectsAsync();
+        }
 
-            CommitListView.Items.Add(new
+        private async Task LoadProjectsAsync()
+        {
+            try
             {
-                Message = "Updated door specifications",
-                CommitId = "def456",
-                Author = "Jane Smith",
-                Timestamp = "2025-12-02 15:45",
-                ChangedElements = 12
-            });
+                ProjectComboBox.IsEnabled = false;
+                var projects = await _apiClient.GetProjectsAsync();
+                ProjectComboBox.ItemsSource = projects;
+                if (projects.Count > 0)
+                {
+                    ProjectComboBox.SelectedIndex = 0;
+                }
+                else
+                {
+                    CommitListView.ItemsSource = new List<CommitItem>
+                    {
+                        new CommitItem { Message = "No projects found.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 }
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load projects: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProjectComboBox.IsEnabled = true;
+            }
+        }
 
-            CommitListView.Items.Add(new
+        private async Task LoadCommitsAsync(string projectId)
+        {
+            try
             {
-                Message = "Initial model setup",
-                CommitId = "ghi789",
-                Author = "John Doe",
-                Timestamp = "2025-12-01 09:00",
-                ChangedElements = 150
-            });
+                CommitListView.ItemsSource = null;
+                var commits = await _apiClient.GetCommitsAsync(projectId);
+                var items = new List<CommitItem>();
+                foreach (var commit in commits)
+                {
+                    items.Add(new CommitItem
+                    {
+                        Message = commit.Message,
+                        CommitId = commit.CommitId,
+                        Author = commit.GetAuthorName(),
+                        Timestamp = commit.Timestamp.ToString("yyyy-MM-dd HH:mm"),
+                        ChangedElements = commit.ChangedElements
+                    });
+                }
+
+                if (items.Count == 0)
+                {
+                    items.Add(new CommitItem { Message = "No commits found.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 });
+                }
+
+                CommitListView.ItemsSource = items;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load commits: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        public async void Refresh()
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                await LoadCommitsAsync(project.ProjectId);
+            }
+        }
+
+        private async void RefreshButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                await LoadCommitsAsync(project.ProjectId);
+            }
+        }
+
+        private async void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                await LoadCommitsAsync(project.ProjectId);
+            }
+        }
+
+        private class CommitItem
+        {
+            public string Message { get; set; }
+            public string CommitId { get; set; }
+            public string Author { get; set; }
+            public string Timestamp { get; set; }
+            public int ChangedElements { get; set; }
         }
     }
 }

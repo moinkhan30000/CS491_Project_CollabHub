@@ -6,6 +6,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using RevitVersionControl.Services;
 using RevitVersionControl.UI;
+using RevitVersionControl;
 
 namespace RevitVersionControl.Commands
 {
@@ -30,8 +31,6 @@ namespace RevitVersionControl.Commands
                 string projectId = publishDialog.SelectedProjectId;
 
                 // Extract elements
-                TaskDialog.Show("Publishing", "Extracting model elements...");
-                
                 var extractor = new ElementExtractor(doc);
                 var elementData = extractor.ExtractAllElements();
 
@@ -62,7 +61,10 @@ namespace RevitVersionControl.Commands
                 }
                 else
                 {
-                    TaskDialog.Show("Error", "Failed to publish snapshot to server.");
+                    var errorDetail = string.IsNullOrWhiteSpace(apiClient.LastError)
+                        ? "Failed to publish snapshot to server."
+                        : $"Failed to publish snapshot to server.\n\n{apiClient.LastError}";
+                    TaskDialog.Show("Error", errorDetail);
                     return Result.Failed;
                 }
             }
@@ -89,6 +91,7 @@ namespace RevitVersionControl.Commands
                 if (pane != null)
                 {
                     pane.Show();
+                    HistoryPaneProvider.Instance?.Refresh();
                     return Result.Succeeded;
                 }
 
@@ -153,7 +156,7 @@ namespace RevitVersionControl.Commands
                 
                 if (diffPane != null)
                 {
-                    // Load changes into pane (would be implemented in the pane)
+                    DiffMergePaneProvider.Instance?.LoadPullResult(pullResult);
                     diffPane.Show();
                 }
 
@@ -210,7 +213,7 @@ namespace RevitVersionControl.Commands
                 
                 if (diffPane != null)
                 {
-                    // Load diff results into pane
+                    DiffMergePaneProvider.Instance?.LoadDiffResult(diffResult);
                     diffPane.Show();
                 }
 

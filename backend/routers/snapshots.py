@@ -4,12 +4,14 @@ Snapshots & Commits Router
 
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import Optional
-from models import CommitCreate, Commit, CommitDetail, ElementSnapshot
+from models import CommitCreate, Commit, CommitDetail, ElementSnapshot, CommitSummary
 from storage import storage
+from diff_engine import DiffEngine
 
 router = APIRouter()
+diff_engine = DiffEngine()
 
-@router.post("/{project_id}/snapshots", response_model=Commit, status_code=status.HTTP_201_CREATED)
+@router.post("/{project_id}/snapshots", response_model=CommitSummary, status_code=status.HTTP_201_CREATED)
 async def create_snapshot(project_id: str, commit_data: CommitCreate):
     """Publish a new snapshot (create commit)"""
     
@@ -23,6 +25,25 @@ async def create_snapshot(project_id: str, commit_data: CommitCreate):
     
     # In production, get user_id from JWT
     user_id = "default-user"
+
+    # Determine parent commit if not provided
+    parent_commit_id = commit_data.parentCommit
+    if not parent_commit_id:
+        latest_commit = storage.get_latest_commit(project_id, commit_data.modelId)
+        parent_commit_id = latest_commit.commitId if latest_commit else None
+
+    # Compute diff vs parent (if exists) for change counts
+    changed_elements = None
+    if parent_commit_id:
+        parent_snapshot = storage.get_snapshot(parent_commit_id)
+        if parent_snapshot:
+            diff_result = diff_engine.compute_diff(
+                base_elements=parent_snapshot.elements,
+                target_elements=commit_data.snapshot.elements,
+                base_version=parent_commit_id,
+                target_version="new"
+            )
+            changed_elements = len(diff_result.changes)
     
     # Create commit with snapshot
     commit = storage.create_commit(
@@ -31,10 +52,11 @@ async def create_snapshot(project_id: str, commit_data: CommitCreate):
         message=commit_data.commitMessage,
         author=user_id,
         snapshot=commit_data.snapshot,
-        parent_commit=commit_data.parentCommit
+        parent_commit=parent_commit_id,
+        changed_elements=changed_elements
     )
     
-    return commit
+    return CommitSummary(**commit.model_dump(exclude={"snapshot"}))
 
 @router.get("/{project_id}/commits", response_model=dict)
 async def list_commits(

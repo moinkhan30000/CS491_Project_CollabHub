@@ -15,6 +15,7 @@ namespace RevitVersionControl.Services
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
         private string _authToken;
+        public string LastError { get; private set; }
 
         public ApiClient(string baseUrl = "http://localhost:8000/api/v1")
         {
@@ -113,13 +114,19 @@ namespace RevitVersionControl.Services
             try
             {
                 var response = await _httpClient.GetAsync(_baseUrl + endpoint);
-                response.EnsureSuccessStatusCode();
-                
                 var content = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    LastError = $"HTTP {(int)response.StatusCode}: {content}";
+                    return default(T);
+                }
+
+                LastError = null;
                 return JsonConvert.DeserializeObject<T>(content);
             }
             catch (Exception ex)
             {
+                LastError = ex.Message;
                 Console.WriteLine($"GET request failed: {ex.Message}");
                 return default(T);
             }
@@ -133,13 +140,19 @@ namespace RevitVersionControl.Services
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 
                 var response = await _httpClient.PostAsync(_baseUrl + endpoint, content);
-                response.EnsureSuccessStatusCode();
-                
                 var responseContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    LastError = $"HTTP {(int)response.StatusCode}: {responseContent}";
+                    return default(T);
+                }
+
+                LastError = null;
                 return JsonConvert.DeserializeObject<T>(responseContent);
             }
             catch (Exception ex)
             {
+                LastError = ex.Message;
                 Console.WriteLine($"POST request failed: {ex.Message}");
                 return default(T);
             }
@@ -194,12 +207,37 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("message")]
         public string Message { get; set; }
+
+        [JsonProperty("changedElements")]
+        public int ChangedElements { get; set; }
         
         [JsonProperty("timestamp")]
         public DateTime Timestamp { get; set; }
         
         [JsonProperty("author")]
         public object Author { get; set; }
+
+        public string GetAuthorName()
+        {
+            if (Author == null)
+            {
+                return "Unknown";
+            }
+
+            if (Author is string authorString)
+            {
+                return authorString;
+            }
+
+            try
+            {
+                return ((Newtonsoft.Json.Linq.JObject)Author)["fullName"]?.ToString() ?? "Unknown";
+            }
+            catch
+            {
+                return "Unknown";
+            }
+        }
     }
 
     public class ElementSnapshot
@@ -262,7 +300,28 @@ namespace RevitVersionControl.Services
         public string Type { get; set; }
         
         [JsonProperty("parameterChanges")]
-        public List<object> ParameterChanges { get; set; }
+        public List<ParameterChange> ParameterChanges { get; set; }
+
+        [JsonProperty("geometryChanged")]
+        public bool GeometryChanged { get; set; }
+
+        [JsonProperty("locationChanged")]
+        public bool LocationChanged { get; set; }
+    }
+
+    public class ParameterChange
+    {
+        [JsonProperty("name")]
+        public string Name { get; set; }
+
+        [JsonProperty("oldValue")]
+        public object OldValue { get; set; }
+
+        [JsonProperty("newValue")]
+        public object NewValue { get; set; }
+
+        [JsonProperty("type")]
+        public string Type { get; set; }
     }
 
     public class PullResult

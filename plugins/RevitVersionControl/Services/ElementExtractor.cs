@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json.Linq;
@@ -64,15 +67,29 @@ namespace RevitVersionControl.Services
             if (element == null)
                 return null;
 
+            var parameters = ExtractParameters(element);
+            var location = ExtractLocation(element);
+            if (location != null && !location.HasValues)
+            {
+                location = null;
+            }
+
             var elementData = new JObject
             {
                 ["id"] = element.UniqueId,
                 ["category"] = element.Category?.Name ?? "Unknown",
                 ["type"] = GetElementTypeName(element),
-                ["parameters"] = ExtractParameters(element),
-                ["geometry"] = ExtractGeometry(element),
-                ["location"] = ExtractLocation(element)
+                ["parameters"] = parameters,
+                ["location"] = location,
+                ["geometry"] = ExtractGeometry(element, location)
             };
+
+            var typeInfo = GetElementTypeInfo(element);
+            if (typeInfo.HasValue)
+            {
+                elementData["familyName"] = typeInfo.Value.FamilyName;
+                elementData["typeName"] = typeInfo.Value.TypeName;
+            }
 
             // Add optional properties
             if (element.WorksetId != null && element.WorksetId != WorksetId.InvalidWorksetId)
@@ -105,7 +122,12 @@ namespace RevitVersionControl.Services
         {
             var parameters = new JObject();
 
-            foreach (Parameter param in element.Parameters)
+            var orderedParams = element.Parameters
+                .Cast<Parameter>()
+                .Where(p => p != null)
+                .OrderBy(p => p.Definition?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+
+            foreach (Parameter param in orderedParams)
             {
                 try
                 {
@@ -142,7 +164,7 @@ namespace RevitVersionControl.Services
                     return param.AsInteger();
                 
                 case StorageType.Double:
-                    return param.AsDouble();
+                    return NormalizeDouble(param.AsDouble());
                 
                 case StorageType.ElementId:
                     var elemId = param.AsElementId();
@@ -153,7 +175,7 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private JObject ExtractGeometry(Element element)
+        private JObject ExtractGeometry(Element element, JObject locationData)
         {
             var geometryData = new JObject();
 
@@ -190,11 +212,16 @@ namespace RevitVersionControl.Services
                 }
 
                 // Compute geometry hash for change detection
-                geometryData["geometryHash"] = ComputeGeometryHash(geomElement);
+                geometryData["geometryHash"] = ComputeGeometryHash(element, bbox, locationData);
             }
             catch
             {
                 // Geometry extraction failed
+            }
+
+            if (!geometryData.HasValues)
+            {
+                return null;
             }
 
             return geometryData;
@@ -265,6 +292,28 @@ namespace RevitVersionControl.Services
             return element.Name ?? "Unknown";
         }
 
+        private (string FamilyName, string TypeName)? GetElementTypeInfo(Element element)
+        {
+            try
+            {
+                ElementId typeId = element.GetTypeId();
+                if (typeId != ElementId.InvalidElementId)
+                {
+                    ElementType elemType = _document.GetElement(typeId) as ElementType;
+                    if (elemType != null)
+                    {
+                        return (elemType.FamilyName, elemType.Name);
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore failures
+            }
+
+            return null;
+        }
+
         private string GetPhaseName(ElementId phaseId)
         {
             if (phaseId == null || phaseId == ElementId.InvalidElementId)
@@ -281,11 +330,47 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private string ComputeGeometryHash(GeometryElement geomElement)
+        private string ComputeGeometryHash(Element element, BoundingBoxXYZ bbox, JObject locationData)
         {
-            // Simplified hash computation
-            // In production, would compute actual hash of geometry data
-            return Guid.NewGuid().ToString("N").Substring(0, 16);
+            var builder = new StringBuilder();
+            builder.Append(element.Category?.Name ?? "Unknown");
+            builder.Append("|");
+            builder.Append(GetElementTypeName(element));
+            builder.Append("|");
+
+            if (bbox != null)
+            {
+                builder.Append("bbox:");
+                builder.Append(FormatDouble(bbox.Min.X)).Append(",");
+                builder.Append(FormatDouble(bbox.Min.Y)).Append(",");
+                builder.Append(FormatDouble(bbox.Min.Z)).Append("|");
+                builder.Append(FormatDouble(bbox.Max.X)).Append(",");
+                builder.Append(FormatDouble(bbox.Max.Y)).Append(",");
+                builder.Append(FormatDouble(bbox.Max.Z)).Append("|");
+            }
+
+            if (locationData != null)
+            {
+                builder.Append("loc:");
+                builder.Append(locationData.ToString(Newtonsoft.Json.Formatting.None));
+            }
+
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(builder.ToString());
+                byte[] hash = sha256.ComputeHash(bytes);
+                return BitConverter.ToString(hash).Replace("-", "").Substring(0, 16).ToLowerInvariant();
+            }
+        }
+
+        private static double NormalizeDouble(double value)
+        {
+            return Math.Round(value, 6);
+        }
+
+        private static string FormatDouble(double value)
+        {
+            return NormalizeDouble(value).ToString("R", CultureInfo.InvariantCulture);
         }
 
         private bool ShouldSkipElement(Element element)

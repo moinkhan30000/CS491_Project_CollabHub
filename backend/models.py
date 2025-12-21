@@ -82,6 +82,8 @@ class Element(BaseModel):
     id: str  # Revit UniqueId
     category: str
     type: str
+    familyName: Optional[str] = None
+    typeName: Optional[str] = None
     parameters: Dict[str, Parameter]
     geometry: Optional[Geometry] = None
     location: Optional[Location] = None
@@ -133,6 +135,9 @@ class CommitDetail(CommitBase):
     children: List[str] = []
     summary: Dict[str, int]
     # We deliberately exclude 'snapshot' here to keep the response light
+
+class CommitSummary(CommitBase):
+    commitId: str
 
 # ============= Diff Models =============
 

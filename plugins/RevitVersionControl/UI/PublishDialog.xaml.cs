@@ -1,6 +1,8 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Threading.Tasks;
+using RevitVersionControl.Services;
 
 namespace RevitVersionControl.UI
 {
@@ -9,19 +11,46 @@ namespace RevitVersionControl.UI
         public string CommitMessage { get; private set; }
         public string SelectedProjectId { get; private set; }
 
+        private readonly ApiClient _apiClient = new ApiClient();
+
         public PublishDialog()
         {
             InitializeComponent();
-            LoadProjects();
+            Loaded += PublishDialog_Loaded;
         }
 
-        private void LoadProjects()
+        private async void PublishDialog_Loaded(object sender, RoutedEventArgs e)
         {
-            // Load projects from API
-            // For now, add dummy data
-            ProjectComboBox.Items.Add(new { Name = "Office Building", ProjectId = "project-1" });
-            ProjectComboBox.Items.Add(new { Name = "Residential Complex", ProjectId = "project-2" });
-            ProjectComboBox.SelectedIndex = 0;
+            await LoadProjectsAsync();
+        }
+
+        private async Task LoadProjectsAsync()
+        {
+            try
+            {
+                ProjectComboBox.IsEnabled = false;
+                var projects = await _apiClient.GetProjectsAsync();
+                ProjectComboBox.ItemsSource = projects;
+                ProjectComboBox.DisplayMemberPath = "Name";
+                if (projects.Count > 0)
+                {
+                    ProjectComboBox.SelectedIndex = 0;
+                }
+                else
+                {
+                    MessageBox.Show("No projects found on the server.", "Info",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load projects: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProjectComboBox.IsEnabled = true;
+            }
         }
 
         private void PublishButton_Click(object sender, RoutedEventArgs e)
@@ -41,8 +70,8 @@ namespace RevitVersionControl.UI
             }
 
             CommitMessage = CommitMessageTextBox.Text;
-            dynamic selectedProject = ProjectComboBox.SelectedItem;
-            SelectedProjectId = selectedProject.ProjectId;
+            var selectedProject = ProjectComboBox.SelectedItem as Project;
+            SelectedProjectId = selectedProject?.ProjectId;
 
             DialogResult = true;
             Close();

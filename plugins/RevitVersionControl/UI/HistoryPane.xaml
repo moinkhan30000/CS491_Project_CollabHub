@@ -14,12 +14,12 @@
                 <TextBlock Text="Version History" FontSize="16" FontWeight="Bold" 
                            Foreground="White" Margin="0,0,0,5"/>
                 <StackPanel Orientation="Horizontal">
-                    <Button Content="Refresh" Width="80" Height="25" Margin="0,0,5,0"/>
-                    <ComboBox Width="150" Height="25" SelectedIndex="0">
-                        <ComboBoxItem Content="All Branches"/>
-                        <ComboBoxItem Content="Main Branch"/>
-                        <ComboBoxItem Content="My Commits"/>
-                    </ComboBox>
+                    <Button Name="RefreshButton" Content="Refresh" Width="80" Height="25" Margin="0,0,10,0"
+                            Click="RefreshButton_Click"/>
+                    <TextBlock Text="Project:" Foreground="White" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <ComboBox Name="ProjectComboBox" Width="220" Height="25"
+                              SelectionChanged="ProjectComboBox_SelectionChanged"
+                              DisplayMemberPath="Name"/>
                 </StackPanel>
             </StackPanel>
         </Border>

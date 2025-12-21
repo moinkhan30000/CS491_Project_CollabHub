@@ -119,9 +119,12 @@ namespace RevitVersionControl
     // Dockable Pane Providers
     public class HistoryPaneProvider : IDockablePaneProvider
     {
+        public static UI.HistoryPane Instance { get; private set; }
+
         public void SetupDockablePane(DockablePaneProviderData data)
         {
-            data.FrameworkElement = new UI.HistoryPane();
+            Instance = new UI.HistoryPane();
+            data.FrameworkElement = Instance;
             data.InitialState = new DockablePaneState
             {
                 DockPosition = DockPosition.Tabbed
@@ -131,9 +134,12 @@ namespace RevitVersionControl
 
     public class DiffMergePaneProvider : IDockablePaneProvider
     {
+        public static UI.DiffMergePane Instance { get; private set; }
+
         public void SetupDockablePane(DockablePaneProviderData data)
         {
-            data.FrameworkElement = new UI.DiffMergePane();
+            Instance = new UI.DiffMergePane();
+            data.FrameworkElement = Instance;
             data.InitialState = new DockablePaneState
             {
                 DockPosition = DockPosition.Right

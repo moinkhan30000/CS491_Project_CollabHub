@@ -1,6 +1,9 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using RevitVersionControl.Services;
 
 namespace RevitVersionControl.UI
 {
@@ -13,6 +16,7 @@ namespace RevitVersionControl.UI
         private ComboBox ProjectComboBox;
         private ComboBox BaseCommitComboBox;
         private ComboBox TargetCommitComboBox;
+        private readonly ApiClient _apiClient = new ApiClient();
 
         public DiffSelectDialog()
         {
@@ -31,7 +35,7 @@ namespace RevitVersionControl.UI
             // Project selection
             mainPanel.Children.Add(new TextBlock { Text = "Project:", Margin = new Thickness(0, 0, 0, 5) });
             ProjectComboBox = new ComboBox { Margin = new Thickness(0, 0, 0, 15) };
-            LoadProjects();
+            ProjectComboBox.SelectionChanged += ProjectComboBox_SelectionChanged;
             mainPanel.Children.Add(ProjectComboBox);
 
             // Base commit selection
@@ -69,15 +73,79 @@ namespace RevitVersionControl.UI
             mainPanel.Children.Add(buttonPanel);
 
             this.Content = mainPanel;
+            Loaded += DiffSelectDialog_Loaded;
         }
 
-        private void LoadProjects()
+        private async void DiffSelectDialog_Loaded(object sender, RoutedEventArgs e)
         {
-            // Load projects from API
-            // For now, add dummy data
-            ProjectComboBox.Items.Add(new { Name = "Office Building", ProjectId = "project-1" });
-            ProjectComboBox.Items.Add(new { Name = "Residential Complex", ProjectId = "project-2" });
-            ProjectComboBox.SelectedIndex = 0;
+            await LoadProjectsAsync();
+        }
+
+        private async Task LoadProjectsAsync()
+        {
+            try
+            {
+                ProjectComboBox.IsEnabled = false;
+                var projects = await _apiClient.GetProjectsAsync();
+                ProjectComboBox.ItemsSource = projects;
+                ProjectComboBox.DisplayMemberPath = "Name";
+                if (projects.Count > 0)
+                {
+                    ProjectComboBox.SelectedIndex = 0;
+                }
+                else
+                {
+                    MessageBox.Show("No projects found on the server.", "Info",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load projects: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProjectComboBox.IsEnabled = true;
+            }
+        }
+
+        private async void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                await LoadCommitsAsync(project.ProjectId);
+            }
+        }
+
+        private async Task LoadCommitsAsync(string projectId)
+        {
+            try
+            {
+                BaseCommitComboBox.ItemsSource = null;
+                TargetCommitComboBox.ItemsSource = null;
+
+                var commits = await _apiClient.GetCommitsAsync(projectId);
+                var commitItems = new List<CommitItem>();
+                foreach (var commit in commits)
+                {
+                    commitItems.Add(new CommitItem
+                    {
+                        CommitId = commit.CommitId,
+                        DisplayText = $"{commit.Message} ({commit.CommitId})"
+                    });
+                }
+
+                BaseCommitComboBox.ItemsSource = commitItems;
+                TargetCommitComboBox.ItemsSource = commitItems;
+                BaseCommitComboBox.DisplayMemberPath = "DisplayText";
+                TargetCommitComboBox.DisplayMemberPath = "DisplayText";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load commits: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void CompareButton_Click(object sender, RoutedEventArgs e)
@@ -103,10 +171,18 @@ namespace RevitVersionControl.UI
                 return;
             }
 
-            dynamic selectedProject = ProjectComboBox.SelectedItem;
-            ProjectId = selectedProject.ProjectId;
-            BaseCommitId = BaseCommitComboBox.SelectedItem.ToString();
-            TargetCommitId = TargetCommitComboBox.SelectedItem.ToString();
+            var selectedProject = ProjectComboBox.SelectedItem as Project;
+            ProjectId = selectedProject?.ProjectId;
+
+            if (BaseCommitComboBox.SelectedItem is CommitItem baseItem)
+            {
+                BaseCommitId = baseItem.CommitId;
+            }
+
+            if (TargetCommitComboBox.SelectedItem is CommitItem targetItem)
+            {
+                TargetCommitId = targetItem.CommitId;
+            }
 
             DialogResult = true;
             Close();
@@ -116,6 +192,12 @@ namespace RevitVersionControl.UI
         {
             DialogResult = false;
             Close();
+        }
+
+        private class CommitItem
+        {
+            public string CommitId { get; set; }
+            public string DisplayText { get; set; }
         }
     }
 }
