@@ -108,9 +108,16 @@ async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or D
         if latest_commit and latest_commit.storageUrl:
             file_path = storage_service.get_file_path(latest_commit.storageUrl)
             if file_path.exists():
+                # Get project name for the filename
+                project = project_repo.get_project(member.projectId)
+                project_name = project.name if project else member.projectId
+                
+                # Get actual extension from stored file
+                ext = file_path.suffix if file_path.suffix else ".rvt"
+                
                 return FileResponse(
                     path=file_path, 
-                    filename=f"{member.projectId}.rvt", 
+                    filename=f"{project_name}{ext}", 
                     media_type='application/octet-stream'
                 )
     

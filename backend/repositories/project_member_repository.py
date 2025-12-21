@@ -30,6 +30,9 @@ class ProjectMemberRepository:
 
     def get_pending_invites(self, user_id: str) -> List[dict]:
         """Returns list of invites with Project details"""
+        from entities.commit_entity import Commit
+        from pathlib import Path
+        
         with Session(engine) as session:
             # Join ProjectMember with Project to get details
             statement = select(ProjectMember, Project).where(
@@ -41,12 +44,24 @@ class ProjectMemberRepository:
             
             invites = []
             for member, project in results:
+                # Get file extension from latest commit
+                latest_commit = session.exec(
+                    select(Commit)
+                    .where(Commit.projectId == project.projectId)
+                    .order_by(Commit.timestamp.desc())
+                ).first()
+                
+                file_ext = ".rvt"  # default
+                if latest_commit and latest_commit.storageUrl:
+                    file_ext = Path(latest_commit.storageUrl).suffix or ".rvt"
+                
                 invites.append({
                     "inviteId": member.id,
                     "projectId": project.projectId,
                     "projectName": project.name,
                     "invitedAt": member.invitedAt,
-                    "role": member.role
+                    "role": member.role,
+                    "fileExtension": file_ext
                 })
             return invites
 

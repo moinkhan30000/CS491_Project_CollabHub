@@ -10,6 +10,11 @@ namespace RevitVersionControl.UI
 {
     public partial class InvitationsDialog : Window
     {
+        /// <summary>
+        /// Path to the downloaded file (if user accepted an invitation)
+        /// </summary>
+        public string DownloadedFilePath { get; private set; }
+
         public InvitationsDialog()
         {
             InitializeComponent();
@@ -38,11 +43,23 @@ namespace RevitVersionControl.UI
         {
             if (sender is Button btn && btn.Tag is int inviteId)
             {
+                // Get invitation data from the button's DataContext
+                dynamic invite = btn.DataContext;
+                string projectName = invite?.ProjectName ?? "Project";
+                string fileExt = invite?.FileExtension ?? ".rvt";
+                
+                // Remove leading dot if present for filter, add it back for default extension
+                string extNoDot = fileExt.TrimStart('.');
+                string filterName = extNoDot.ToUpper() == "RVT" ? "Revit Project" : 
+                                    extNoDot.ToUpper() == "RFA" ? "Revit Family" : "Revit File";
+                
                 // Prompt user for save location
                 var saveDialog = new SaveFileDialog
                 {
-                    Filter = "Revit Project (*.rvt)|*.rvt",
-                    Title = "Save Project As"
+                    Filter = $"{filterName} (*.{extNoDot})|*.{extNoDot}|All Files (*.*)|*.*",
+                    Title = "Save Project As",
+                    FileName = projectName,
+                    DefaultExt = fileExt
                 };
 
                 if (saveDialog.ShowDialog() == true)
@@ -74,13 +91,25 @@ namespace RevitVersionControl.UI
                      // Result is the path if successful
                      if (result == savePath)
                      {
-                         MessageBox.Show($"Project saved to: {savePath}\nPlease open it in Revit.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-                         LoadInvites(); // Refresh list
+                         DownloadedFilePath = savePath;
                          
-                         // Ideally we would open the document automatically via Revit API, 
-                         // but since this is a Modal Dialog context, we might need to let the user do it 
-                         // or signal the Command to open it after dialog closes.
-                         // For now, instructing user is safer.
+                         // Ask user if they want to open the project now
+                         var openNow = MessageBox.Show(
+                             $"Project saved to:\n{savePath}\n\nDo you want to open it now?", 
+                             "Success", 
+                             MessageBoxButton.YesNo, 
+                             MessageBoxImage.Question);
+                         
+                         if (openNow == MessageBoxResult.Yes)
+                         {
+                             DialogResult = true; // This will close the dialog
+                             Close();
+                         }
+                         else
+                         {
+                             DownloadedFilePath = null; // User chose not to open
+                             LoadInvites(); // Refresh list
+                         }
                      }
                      else 
                      {
@@ -99,3 +128,4 @@ namespace RevitVersionControl.UI
         }
     }
 }
+

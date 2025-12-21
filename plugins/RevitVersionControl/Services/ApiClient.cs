@@ -405,5 +405,7 @@ namespace RevitVersionControl.Services
         public DateTime InvitedAt { get; set; }
         [JsonProperty("role")]
         public string Role { get; set; }
+        [JsonProperty("fileExtension")]
+        public string FileExtension { get; set; } = ".rvt";
     }
 }

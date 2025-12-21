@@ -114,7 +114,30 @@ namespace RevitVersionControl.Commands
             }
 
             var dialog = new InvitationsDialog();
-            dialog.ShowDialog();
+            var dialogResult = dialog.ShowDialog();
+            
+            // If user accepted an invitation and chose to open the file
+            if (dialogResult == true && !string.IsNullOrEmpty(dialog.DownloadedFilePath))
+            {
+                try
+                {
+                    string filePath = dialog.DownloadedFilePath;
+                    var app = commandData.Application.Application;
+                    
+                    // Open the document
+                    var modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath);
+                    var openOptions = new OpenOptions();
+                    
+                    commandData.Application.OpenAndActivateDocument(modelPath, openOptions, false);
+                    
+                    TaskDialog.Show("Success", $"Project opened: {System.IO.Path.GetFileName(filePath)}");
+                }
+                catch (Exception ex)
+                {
+                    TaskDialog.Show("Error", $"Failed to open document:\n{ex.Message}\n\nYou can manually open the file from: {dialog.DownloadedFilePath}");
+                }
+            }
+            
             return Result.Succeeded;
         }
     }
