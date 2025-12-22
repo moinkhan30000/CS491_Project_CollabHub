@@ -22,6 +22,8 @@ namespace RevitVersionControl.Commands
                     // Logout flow
                     ApiClient.Instance.Logout();
                     Application.SetLoggedInState(false);
+                    HistoryPaneProvider.Instance?.Clear();
+                    DiffMergePaneProvider.Instance?.Clear();
                     TaskDialog.Show("Logged Out", "You have been logged out successfully.");
                 }
                 else

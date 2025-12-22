@@ -110,6 +110,15 @@ namespace RevitVersionControl.UI
             await LoadProjectsAsync();
         }
 
+        public void Clear()
+        {
+            ProjectComboBox.ItemsSource = null;
+            CommitListView.ItemsSource = new List<CommitItem>
+            {
+                new CommitItem { Message = "Please log in to view projects.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 }
+            };
+        }
+
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
             await LoadProjectsAsync();

@@ -50,6 +50,36 @@ def _find_base_file(project_id: str, model_id: str) -> Optional[Path]:
 def find_base_file_path(project_id: str, model_id: str) -> Optional[Path]:
     return _find_base_file(project_id, model_id)
 
+async def save_base_file(project_id: str, model_id: str, file: UploadFile) -> Path:
+    project_dir = _project_dir(project_id)
+    model_key = _model_hash(model_id)
+    extension = Path(file.filename).suffix or ".rvt"
+    dest_path = project_dir / f"{model_key}{extension}"
+
+    try:
+        await file.seek(0)
+    except Exception:
+        pass
+
+    with dest_path.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+
+    metadata_path = project_dir / f"{model_key}.json"
+    metadata = {
+        "projectId": project_id,
+        "modelId": model_id,
+        "originalFileName": file.filename,
+        "storedFileName": dest_path.name,
+        "uploadedAt": datetime.utcnow().isoformat() + "Z"
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+
+    return dest_path
+
 def _validate_project(project_id: str) -> None:
     project = project_repo.get_project(project_id)
     if not project:

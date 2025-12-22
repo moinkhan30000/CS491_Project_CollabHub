@@ -156,11 +156,21 @@ namespace RevitVersionControl.Services
             try
             {
                 var response = await _httpClient.PostAsync($"{_baseUrl}/projects/invitations/{inviteId}/respond?status={status}", null);
-                response.EnsureSuccessStatusCode();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    return $"Error: HTTP {(int)response.StatusCode}: {errorContent}";
+                }
 
                 if (status == "ACTIVE" && !string.IsNullOrEmpty(savePath))
                 {
-                    // If accepted, we expect a file stream
+                    var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
+                    if (!mediaType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        return $"Error: Unexpected response: {errorContent}";
+                    }
+
                     using (var stream = await response.Content.ReadAsStreamAsync())
                     using (var fileStream = new System.IO.FileStream(savePath, System.IO.FileMode.Create))
                     {

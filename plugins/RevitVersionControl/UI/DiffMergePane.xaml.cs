@@ -56,7 +56,7 @@ namespace RevitVersionControl.UI
             ChangesListView.ItemsSource = BuildChangeItems(pullResult.Changes);
         }
 
-        private void Clear()
+        public void Clear()
         {
             BaseCommitText.Text = "-";
             TargetCommitText.Text = "-";

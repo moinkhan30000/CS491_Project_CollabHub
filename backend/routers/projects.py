@@ -10,7 +10,7 @@ from repositories.project_member_repository import ProjectMemberRepository
 from repositories.user_repository import UserRepository
 from services.storage import StorageService
 from dependencies import get_current_user
-from routers.base_files import find_base_file_path
+from routers.base_files import find_base_file_path, save_base_file
 import shutil
 import os
 
@@ -50,11 +50,16 @@ async def init_project(
     # 1. Create Project
     project = project_repo.create_project(name, description, created_by=user_id)
     
-    # 2. Upload File
-    import uuid
-    commit_uuid = str(uuid.uuid4())
-    
-    storage_url = await storage_service.upload_file(file, project.projectId, commit_uuid)
+    # 2. Save base file (single source of truth for now)
+    await save_base_file(project.projectId, "init", file)
+
+    # Also store base file for future reconstruction
+    try:
+        file.file.seek(0)
+        await save_base_file(project.projectId, "init", file)
+    except Exception:
+        # Base file is optional; init should still succeed if this fails.
+        pass
     
     # 3. Create Initial Commit
     commit_repo.create_commit(
@@ -62,7 +67,7 @@ async def init_project(
         model_id="init",
         message="Initial Commit",
         author=user_id,
-        storage_url=storage_url,
+        storage_url=None,
         change_type="ADD"
     )
     
@@ -104,27 +109,36 @@ async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or D
          raise HTTPException(status_code=404, detail="Invitation not found")
          
     if status == "ACTIVE":
-        # Auto-Download Logic
-        latest_commit = commit_repo.get_latest_commit(member.projectId)
-        if latest_commit:
-            file_path = None
-            if latest_commit.storageUrl:
-                file_path = storage_service.get_file_path(latest_commit.storageUrl)
-            elif latest_commit.modelId:
-                file_path = find_base_file_path(member.projectId, latest_commit.modelId)
+        # Auto-Download Logic - return first available base file for project
+        base_dir = os.path.join(os.getenv("DATA_DIR", os.path.join(os.getcwd(), "data")), "base_files", member.projectId)
+        if os.path.isdir(base_dir):
+            candidates = [
+                os.path.join(base_dir, name)
+                for name in os.listdir(base_dir)
+                if not name.endswith(".json")
+            ]
+            candidates = [path for path in candidates if os.path.isfile(path)]
 
-            if file_path and file_path.exists():
-                # Get project name for the filename
+            if candidates:
+                # Prefer the largest file to avoid tiny/invalid uploads.
+                file_path = max(candidates, key=lambda p: os.path.getsize(p))
+
+                if os.path.getsize(file_path) < 10240:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Base file is too small; upload may have failed."
+                    )
+
                 project = project_repo.get_project(member.projectId)
                 project_name = project.name if project else member.projectId
-
-                # Get actual extension from stored file
-                ext = file_path.suffix if file_path.suffix else ".rvt"
+                ext = os.path.splitext(file_path)[1] or ".rvt"
 
                 return FileResponse(
                     path=file_path,
                     filename=f"{project_name}{ext}",
                     media_type='application/octet-stream'
                 )
+
+        raise HTTPException(status_code=404, detail="Project file not found for invitation.")
     
     return {"status": status, "message": "Invitation updated"}
