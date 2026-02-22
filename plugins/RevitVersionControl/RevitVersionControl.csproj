@@ -15,11 +15,11 @@
   <!-- Revit API DLLs -->
   <ItemGroup>
     <Reference Include="RevitAPI">
-      <HintPath>D:\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="RevitAPIUI">
-      <HintPath>D:\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

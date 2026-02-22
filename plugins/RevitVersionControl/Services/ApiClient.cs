@@ -491,6 +491,12 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("locationChanged")]
         public bool LocationChanged { get; set; }
+
+        [JsonProperty("oldData")]
+        public Dictionary<string, object> OldData { get; set; }
+
+        [JsonProperty("newData")]
+        public Dictionary<string, object> NewData { get; set; }
     }
 
     public class ParameterChange

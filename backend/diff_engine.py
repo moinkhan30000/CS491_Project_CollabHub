@@ -290,3 +290,63 @@ class DiffEngine:
                     result_dict[change.elementId] = Element(**change.newData)
         
         return list(result_dict.values())
+
+    def apply_changes(
+        self,
+        base_elements: List[Element],
+        changes: List[Change]
+    ) -> List[Element]:
+        """
+        Apply a list of changes to base elements.
+    
+        This is the core function for reconstructing a new state from:
+        - A starting state (base_elements)
+        - A list of modifications (changes)
+    
+        Args:
+            base_elements: List of elements to start with
+            changes: List of Change objects (added/modified/deleted)
+        
+        Returns:
+            Final list of elements after all changes applied
+        
+        Example:
+            base = [wall-1, wall-2, wall-3]
+            changes = [
+                Change(added, wall-4),
+                Change(deleted, wall-2),
+                Change(modified, wall-1, height=4.0)
+            ]
+            result = engine.apply_changes(base, changes)
+            # Returns: [wall-1(modified), wall-3, wall-4]
+        """
+        # Convert to dict for fast O(1) lookup and modification
+        result_dict = {elem.id: elem for elem in base_elements}
+    
+        # Apply each change in order
+        for change in changes:
+            try:
+                if change.changeType == "added":
+                    # Create new element from newData
+                    if change.newData:
+                        new_element = Element(**change.newData)
+                        result_dict[change.elementId] = new_element
+            
+                elif change.changeType == "deleted":
+                    # Remove element if it exists
+                    if change.elementId in result_dict:
+                        del result_dict[change.elementId]
+            
+                elif change.changeType == "modified":
+                    # Replace element with updated version
+                    if change.newData and change.elementId in result_dict:
+                        updated_element = Element(**change.newData)
+                        result_dict[change.elementId] = updated_element
+        
+            except Exception as e:
+                # Log error but continue processing
+                print(f"Warning: Failed to apply change for {change.elementId}: {str(e)}")
+                continue
+    
+        # Return as list (order doesn't matter, but keep consistent)
+        return list(result_dict.values())

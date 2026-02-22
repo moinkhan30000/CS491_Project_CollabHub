@@ -102,3 +102,54 @@ class CommitRepository:
             if commit and commit.snapshot:
                 return ElementSnapshot(**commit.snapshot)
             return None
+    
+def get_changes_between_snapshots(
+    self,
+    from_commit_id: str,
+    to_commit_id: str,
+    diff_engine
+) -> Optional[List]:
+    """
+    Get the list of changes needed to go from one snapshot to another.
+    
+    This uses the diff engine to compare snapshots.
+    
+    Args:
+        from_commit_id: Starting commit ID (user has this version)
+        to_commit_id: Target commit ID (want this version)
+        diff_engine: DiffEngine instance to compute diffs
+        
+    Returns:
+        List of Change objects to apply, or None if commits not found
+        
+    Example:
+        changes = repo.get_changes_between_snapshots(
+            from_commit_id="commit-abc",
+            to_commit_id="commit-xyz",
+            diff_engine=engine
+        )
+        # Returns: [Change(added, wall-4), Change(deleted, wall-2), ...]
+    """
+    # Get both snapshots
+    from_snapshot = self.get_snapshot(from_commit_id)
+    to_snapshot = self.get_snapshot(to_commit_id)
+    
+    # Validate
+    if not from_snapshot:
+        print(f"Error: Snapshot for commit {from_commit_id} not found")
+        return None
+    
+    if not to_snapshot:
+        print(f"Error: Snapshot for commit {to_commit_id} not found")
+        return None
+    
+    # Compute diff
+    diff_result = diff_engine.compute_diff(
+        base_elements=from_snapshot.elements,
+        target_elements=to_snapshot.elements,
+        base_version=from_commit_id,
+        target_version=to_commit_id
+    )
+    
+    # Return the changes
+    return diff_result.changes

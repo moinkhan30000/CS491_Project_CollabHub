@@ -257,7 +257,7 @@ namespace RevitVersionControl.Commands
                 string currentCommit = pullDialog.CurrentCommitId;
                 string projectId = pullDialog.ProjectId;
 
-                // Get changes from server
+                // Step 1: Get changes from server
                 TaskDialog.Show("Pulling", "Fetching changes from server...");
                 
                 var pullTask = Task.Run(async () => 
@@ -270,7 +270,7 @@ namespace RevitVersionControl.Commands
                     return Result.Failed;
                 }
 
-                // Check for conflicts
+                // Step 2: Check for conflicts
                 if (pullResult.RequiresResolution)
                 {
                     TaskDialog.Show("Conflicts", 
@@ -279,7 +279,7 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Show diff/merge pane with changes
+                // Step 3: Show changes in diff/merge pane for review
                 var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
                 DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
                 
@@ -289,16 +289,98 @@ namespace RevitVersionControl.Commands
                     diffPane.Show();
                 }
 
-                TaskDialog.Show("Success", 
-                    $"Found {pullResult.Changes.Count} changes.\n" +
-                    "Review and apply changes in the Merge pane.");
+                // Step 4: Ask user if they want to apply
+                int totalChanges = pullResult.Changes.Count;
+                int addedCount = pullResult.Changes.Count(c => c.ChangeType == "added");
+                int modifiedCount = pullResult.Changes.Count(c => c.ChangeType == "modified");
+                int deletedCount = pullResult.Changes.Count(c => c.ChangeType == "deleted");
 
-                return Result.Succeeded;
+                TaskDialogCommonButtons buttons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No;
+                TaskDialog confirmDialog = new TaskDialog("Apply Changes?")
+                {
+                    MainInstruction = "Apply Remote Changes",
+                    MainContent = $"Found {totalChanges} changes:\n" +
+                                 $"  • Added: {addedCount}\n" +
+                                 $"  • Modified: {modifiedCount}\n" +
+                                 $"  • Deleted: {deletedCount}\n\n" +
+                                 $"Do you want to apply these changes to your model?",
+                    CommonButtons = buttons
+                };
+
+                TaskDialogResult applyResult = confirmDialog.Show();
+
+                if (applyResult != TaskDialogResult.Yes)
+                {
+                    TaskDialog.Show("Cancelled", "Pull cancelled. No changes were applied.");
+                    return Result.Succeeded;
+                }
+
+                // Step 5: Apply changes to local Revit document
+                TaskDialog.Show("Applying", "Applying changes to your model. Please wait...");
+
+                var applier = new ElementApplier(doc);
+                var applyResponse = applier.ApplyChanges(pullResult.Changes);
+
+                // Step 6: Show result
+                if (applyResponse.Success)
+                {
+                    string resultMessage = $"Changes Applied Successfully!\n\n" +
+                                          $"Applied: {applyResponse.AppliedCount}\n" +
+                                          $"Skipped: {applyResponse.SkippedCount}";
+
+                    if (applyResponse.Errors.Count > 0)
+                    {
+                        resultMessage += $"\n\nWarnings/Errors: {applyResponse.Errors.Count}\n";
+                        if (applyResponse.Errors.Count <= 5)
+                        {
+                            resultMessage += string.Join("\n", applyResponse.Errors);
+                        }
+                        else
+                        {
+                            resultMessage += string.Join("\n", applyResponse.Errors.Take(5));
+                            resultMessage += $"\n... and {applyResponse.Errors.Count - 5} more";
+                        }
+                    }
+
+                    TaskDialog.Show("Success", resultMessage);
+
+                    // Log all errors to console for detailed review
+                    if (applyResponse.Errors.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine("\n=== APPLY CHANGES DETAILED LOG ===");
+                        foreach (var error in applyResponse.Errors)
+                        {
+                            System.Diagnostics.Debug.WriteLine(error);
+                        }
+                        System.Diagnostics.Debug.WriteLine("=================================\n");
+                    }
+
+                    return Result.Succeeded;
+                }
+                else
+                {
+                    string errorMessage = "Failed to apply changes:\n\n";
+                    if (applyResponse.Errors.Count > 0)
+                    {
+                        errorMessage += string.Join("\n", applyResponse.Errors.Take(5));
+                        if (applyResponse.Errors.Count > 5)
+                        {
+                            errorMessage += $"\n\n... and {applyResponse.Errors.Count - 5} more errors";
+                        }
+                    }
+                    else
+                    {
+                        errorMessage += "Unknown error occurred.";
+                    }
+
+                    TaskDialog.Show("Error", errorMessage);
+                    return Result.Failed;
+                }
             }
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("Error", $"Failed to pull: {ex.Message}");
+                TaskDialog.Show("Error", $"Pull failed: {ex.Message}");
                 return Result.Failed;
             }
         }
