@@ -396,7 +396,6 @@ namespace RevitVersionControl.Commands
 
             try
             {
-                // Show diff dialog for selecting versions to compare
                 var diffDialog = new DiffSelectDialog();
                 var result = diffDialog.ShowDialog();
 
@@ -413,12 +412,20 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Get diff from server
-                TaskDialog.Show("Computing Diff", "Comparing versions...");
-                
-                var diffTask = Task.Run(async () => 
-                    await ApiClient.Instance.GetDiffAsync(projectId, baseCommit, targetCommit));
-                var diffResult = diffTask.GetAwaiter().GetResult();
+                // Use wait cursor instead of blocking TaskDialog
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+
+                DiffResult diffResult = null;
+                try
+                {
+                    var diffTask = Task.Run(async () =>
+                        await ApiClient.Instance.GetDiffAsync(projectId, baseCommit, targetCommit));
+                    diffResult = diffTask.GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    System.Windows.Input.Mouse.OverrideCursor = null;
+                }
 
                 if (diffResult == null)
                 {
@@ -437,26 +444,27 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Show diff/merge pane with results
+                // Load result into pane and show it
                 var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
                 DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
-                
+
                 if (diffPane != null)
                 {
                     DiffMergePaneProvider.Instance?.LoadDiffResult(diffResult);
                     diffPane.Show();
                 }
 
-                TaskDialog.Show("Diff Results", 
+                TaskDialog.Show("Diff Results",
                     $"Added: {diffResult.Summary["added"]}\n" +
                     $"Modified: {diffResult.Summary["modified"]}\n" +
                     $"Deleted: {diffResult.Summary["deleted"]}\n\n" +
-                    "Changed elements are highlighted in the view.");
+                    "Results loaded in the Changes & Merge pane.");
 
                 return Result.Succeeded;
             }
             catch (Exception ex)
             {
+                System.Windows.Input.Mouse.OverrideCursor = null;
                 message = ex.Message;
                 TaskDialog.Show("Error", $"Failed to compute diff: {ex.Message}");
                 return Result.Failed;

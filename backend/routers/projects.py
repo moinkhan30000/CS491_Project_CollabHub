@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse
 from typing import List, Optional
+from datetime import datetime
 from schemas.project_schema import ProjectCreate
+from schemas.element_schema import ElementSnapshot
 from entities.project_entity import Project
 from entities.user_entity import User
 from repositories.project_repository import ProjectRepository
@@ -38,42 +40,40 @@ async def init_project(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Initialize a new project:
-    1. Create Project
-    2. Upload Initial File
-    3. Create Initial Commit
-    4. Set Owner
-    """
     user_id = current_user.userId
-    
+
     # 1. Create Project
     project = project_repo.create_project(name, description, created_by=user_id)
-    
-    # 2. Save base file (single source of truth for now)
+
+    # 2. Save base file
     await save_base_file(project.projectId, "init", file)
 
-    # Also store base file for future reconstruction
-    try:
-        file.file.seek(0)
-        await save_base_file(project.projectId, "init", file)
-    except Exception:
-        # Base file is optional; init should still succeed if this fails.
-        pass
-    
-    # 3. Create Initial Commit
+    # 3. Create Initial Commit WITH empty snapshot so diff works
+    empty_snapshot = ElementSnapshot(
+        version="1.0",
+        projectId=project.projectId,
+        modelId="init",
+        timestamp=datetime.utcnow(),
+        userName=current_user.fullName,
+        commitMessage="Initial Commit",
+        elements=[]
+    )
+
     commit_repo.create_commit(
         project_id=project.projectId,
         model_id="init",
         message="Initial Commit",
         author=user_id,
         storage_url=None,
-        change_type="ADD"
+        change_type="ADD",
+        snapshot=empty_snapshot,
+        element_count=0,
+        changed_elements=0
     )
-    
+
     # 4. Set Owner
     member_repo.add_member(project.projectId, user_id, role="OWNER", status="ACTIVE")
-    
+
     return {"projectId": project.projectId, "name": project.name, "status": "Initialized"}
 
 # --- INVITATIONS ---
@@ -84,12 +84,11 @@ async def invite_user(project_id: str, email: str):
     user = user_repo.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
-    # Check if already member
+
     existing = member_repo.get_member(project_id, user.userId)
     if existing:
         raise HTTPException(status_code=400, detail="User is already a member or invited")
-        
+
     member_repo.add_member(project_id, user.userId, role="COLLABORATOR", status="PENDING")
     return {"message": f"Invitation sent to {email}"}
 
@@ -99,17 +98,12 @@ async def get_pending_invites(current_user: User = Depends(get_current_user)):
     return member_repo.get_pending_invites(current_user.userId)
 
 @router.post("/invitations/{invite_id}/respond")
-async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or DECLINED
-    """
-    Accept or Decline invitation.
-    If ACCEPTED, returns the latest project file.
-    """
+async def respond_invitation(invite_id: int, status: str):
     member = member_repo.update_status(invite_id, status)
     if not member:
-         raise HTTPException(status_code=404, detail="Invitation not found")
-         
+        raise HTTPException(status_code=404, detail="Invitation not found")
+
     if status == "ACTIVE":
-        # Auto-Download Logic - return first available base file for project
         base_dir = os.path.join(os.getenv("DATA_DIR", os.path.join(os.getcwd(), "data")), "base_files", member.projectId)
         if os.path.isdir(base_dir):
             candidates = [
@@ -120,7 +114,6 @@ async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or D
             candidates = [path for path in candidates if os.path.isfile(path)]
 
             if candidates:
-                # Prefer the largest file to avoid tiny/invalid uploads.
                 file_path = max(candidates, key=lambda p: os.path.getsize(p))
 
                 if os.path.getsize(file_path) < 10240:
@@ -140,5 +133,5 @@ async def respond_invitation(invite_id: int, status: str): # status: ACTIVE or D
                 )
 
         raise HTTPException(status_code=404, detail="Project file not found for invitation.")
-    
+
     return {"status": status, "message": "Invitation updated"}

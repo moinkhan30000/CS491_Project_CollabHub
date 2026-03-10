@@ -10,6 +10,8 @@
 
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
+
+    <AddInDestination>$(AppData)\Autodesk\Revit\Addins\2026</AddInDestination>
   </PropertyGroup>
 
   <!-- Revit API DLLs -->
@@ -30,12 +32,26 @@
   </ItemGroup>
 
   <!-- Copy addin + dll after build -->
-  <PropertyGroup>
-    <PostBuildEvent>
-      copy "$(ProjectDir)*.addin" "%AppData%\Autodesk\Revit\Addins\2026\"
-      copy "$(TargetPath)" "%AppData%\Autodesk\Revit\Addins\2026\"
-      copy "$(TargetDir)*.config" "%AppData%\Autodesk\Revit\Addins\2026\"
-    </PostBuildEvent>
-  </PropertyGroup>
+  <Target Name="CopyAddInFiles" AfterTargets="Build">
+    <Message Text="========================================" Importance="high" />
+    <Message Text="ProjectDir: $(ProjectDir)" Importance="high" />
+    <Message Text="TargetPath: $(TargetPath)" Importance="high" />
+    <Message Text="TargetDir: $(TargetDir)" Importance="high" />
+    <Message Text="AddInDestination: $(AddInDestination)" Importance="high" />
+    <Message Text="========================================" Importance="high" />
+    
+    <!-- Copy .addin file -->
+    <Exec Command="copy &quot;$(ProjectDir)RevitVersionControl.addin&quot; &quot;$(AddInDestination)\&quot;" />
+    <Message Text="✓ .addin file copied" Importance="high" />
+    
+    <!-- Copy .dll file -->
+    <Exec Command="copy &quot;$(TargetPath)&quot; &quot;$(AddInDestination)\&quot;" />
+    <Message Text="✓ .dll file copied" Importance="high" />
+    
+    <!-- Copy .config file -->
+    <Exec Command="copy &quot;$(TargetDir)*.config&quot; &quot;$(AddInDestination)\&quot;" />
+    <Message Text="✓ .config files copied" Importance="high" />
+  </Target>
 
 </Project>
+
