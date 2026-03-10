@@ -78,12 +78,15 @@ Title="Changes &amp; Merge">
         <!-- Action Buttons -->
         <Border Grid.Row="2" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0"/>
-                <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0"/>
+                <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0"
+						Click="SelectAll_Click"/>
+                <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0"
+						Click="DeselectAll_Click"/>
                 <Button Content="Highlight in View" Width="120" Height="30" Margin="0,0,15,0"
-                        Background="#FFD700"/>
+                        Background="#FFD700" Click="Highlight_Click"/>
                 <Button Content="Apply Selected" Width="120" Height="30"
-                        Background="#28A745" Foreground="White" FontWeight="Bold"/>
+                        Background="#28A745" Foreground="White" FontWeight="Bold"
+						Click="ApplySelected_Click"/>
             </StackPanel>
         </Border>
     </Grid>

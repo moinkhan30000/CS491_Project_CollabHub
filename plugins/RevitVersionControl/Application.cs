@@ -176,13 +176,8 @@ namespace RevitVersionControl
     // Dockable Pane Providers - Stub implementations with all required methods
     public class HistoryPaneProvider : IDockablePaneProvider
     {
-        public static HistoryPaneProvider Instance { get; private set; }
+        public static HistoryPaneProvider Instance { get; private set; } = new HistoryPaneProvider();
         private HistoryPane _historyPane;
-
-        public HistoryPaneProvider()
-        {
-            Instance = this; // ? capture this as the singleton
-        }
 
         public void SetupDockablePane(DockablePaneProviderData data)
         {
@@ -203,7 +198,7 @@ namespace RevitVersionControl
 
         public DiffMergePaneProvider()
         {
-            Instance = this; // ? capture this as the singleton
+            Instance = this;
         }
 
         public void SetupDockablePane(DockablePaneProviderData data)

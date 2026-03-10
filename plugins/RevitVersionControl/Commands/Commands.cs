@@ -246,7 +246,6 @@ namespace RevitVersionControl.Commands
                 UIApplication uiApp = commandData.Application;
                 Document doc = uiApp.ActiveUIDocument.Document;
 
-                // Show pull dialog
                 var pullDialog = new PullDialog();
                 var result = pullDialog.ShowDialog();
 
@@ -257,12 +256,20 @@ namespace RevitVersionControl.Commands
                 string currentCommit = pullDialog.CurrentCommitId;
                 string projectId = pullDialog.ProjectId;
 
-                // Step 1: Get changes from server
-                TaskDialog.Show("Pulling", "Fetching changes from server...");
-                
-                var pullTask = Task.Run(async () => 
-                    await ApiClient.Instance.PullChangesAsync(projectId, currentCommit, targetCommit));
-                var pullResult = pullTask.GetAwaiter().GetResult();
+                // Use wait cursor instead of blocking TaskDialog
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+
+                PullResult pullResult = null;
+                try
+                {
+                    var pullTask = Task.Run(async () =>
+                        await ApiClient.Instance.PullChangesAsync(projectId, currentCommit, targetCommit));
+                    pullResult = pullTask.GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    System.Windows.Input.Mouse.OverrideCursor = null;
+                }
 
                 if (pullResult == null)
                 {
@@ -270,26 +277,24 @@ namespace RevitVersionControl.Commands
                     return Result.Failed;
                 }
 
-                // Step 2: Check for conflicts
                 if (pullResult.RequiresResolution)
                 {
-                    TaskDialog.Show("Conflicts", 
+                    TaskDialog.Show("Conflicts",
                         $"There are {pullResult.Conflicts.Count} conflicts that need resolution.\n" +
                         "Please use the Merge dialog to resolve conflicts.");
                     return Result.Succeeded;
                 }
 
-                // Step 3: Show changes in diff/merge pane for review
+                // Show changes in diff/merge pane
                 var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
                 DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
-                
+
                 if (diffPane != null)
                 {
                     DiffMergePaneProvider.Instance?.LoadPullResult(pullResult);
                     diffPane.Show();
                 }
 
-                // Step 4: Ask user if they want to apply
                 int totalChanges = pullResult.Changes.Count;
                 int addedCount = pullResult.Changes.Count(c => c.ChangeType == "added");
                 int modifiedCount = pullResult.Changes.Count(c => c.ChangeType == "modified");
@@ -315,13 +320,20 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Step 5: Apply changes to local Revit document
-                TaskDialog.Show("Applying", "Applying changes to your model. Please wait...");
+                // Use wait cursor for apply as well
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
 
-                var applier = new ElementApplier(doc);
-                var applyResponse = applier.ApplyChanges(pullResult.Changes);
+                ElementApplier.ApplyResult applyResponse = null;
+                try
+                {
+                    var applier = new ElementApplier(doc);
+                    applyResponse = applier.ApplyChanges(pullResult.Changes);
+                }
+                finally
+                {
+                    System.Windows.Input.Mouse.OverrideCursor = null;
+                }
 
-                // Step 6: Show result
                 if (applyResponse.Success)
                 {
                     string resultMessage = $"Changes Applied Successfully!\n\n" +
@@ -331,27 +343,18 @@ namespace RevitVersionControl.Commands
                     if (applyResponse.Errors.Count > 0)
                     {
                         resultMessage += $"\n\nWarnings/Errors: {applyResponse.Errors.Count}\n";
-                        if (applyResponse.Errors.Count <= 5)
-                        {
-                            resultMessage += string.Join("\n", applyResponse.Errors);
-                        }
-                        else
-                        {
-                            resultMessage += string.Join("\n", applyResponse.Errors.Take(5));
+                        resultMessage += string.Join("\n", applyResponse.Errors.Take(5));
+                        if (applyResponse.Errors.Count > 5)
                             resultMessage += $"\n... and {applyResponse.Errors.Count - 5} more";
-                        }
                     }
 
                     TaskDialog.Show("Success", resultMessage);
 
-                    // Log all errors to console for detailed review
                     if (applyResponse.Errors.Count > 0)
                     {
                         System.Diagnostics.Debug.WriteLine("\n=== APPLY CHANGES DETAILED LOG ===");
                         foreach (var error in applyResponse.Errors)
-                        {
                             System.Diagnostics.Debug.WriteLine(error);
-                        }
                         System.Diagnostics.Debug.WriteLine("=================================\n");
                     }
 
@@ -364,9 +367,7 @@ namespace RevitVersionControl.Commands
                     {
                         errorMessage += string.Join("\n", applyResponse.Errors.Take(5));
                         if (applyResponse.Errors.Count > 5)
-                        {
                             errorMessage += $"\n\n... and {applyResponse.Errors.Count - 5} more errors";
-                        }
                     }
                     else
                     {
@@ -379,6 +380,7 @@ namespace RevitVersionControl.Commands
             }
             catch (Exception ex)
             {
+                System.Windows.Input.Mouse.OverrideCursor = null;
                 message = ex.Message;
                 TaskDialog.Show("Error", $"Pull failed: {ex.Message}");
                 return Result.Failed;

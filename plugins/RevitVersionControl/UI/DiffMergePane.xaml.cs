@@ -4,24 +4,30 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Collections.Generic;
 using System.Linq;
+using System.ComponentModel;
 using RevitVersionControl.Services;
+using Autodesk.Revit.UI;
 
 namespace RevitVersionControl.UI
 {
     public partial class DiffMergePane : Page
     {
+        private List<Change> _currentChanges = new List<Change>();
+        private Autodesk.Revit.DB.Document _currentDocument;
+
         public DiffMergePane()
         {
             InitializeComponent();
         }
 
+        public void SetDocument(Autodesk.Revit.DB.Document doc)
+        {
+            _currentDocument = doc;
+        }
+
         public void LoadDiffResult(DiffResult diffResult)
         {
-            if (diffResult == null)
-            {
-                Clear();
-                return;
-            }
+            if (diffResult == null) { Clear(); return; }
 
             BaseCommitText.Text = diffResult.BaseVersion ?? "-";
             TargetCommitText.Text = diffResult.TargetVersion ?? "-";
@@ -34,16 +40,13 @@ namespace RevitVersionControl.UI
             ModifiedCountText.Text = modified.ToString();
             DeletedCountText.Text = deleted.ToString();
 
-            ChangesListView.ItemsSource = BuildChangeItems(diffResult.Changes);
+            _currentChanges = diffResult.Changes ?? new List<Change>();
+            ChangesListView.ItemsSource = BuildChangeItems(_currentChanges);
         }
 
         public void LoadPullResult(PullResult pullResult)
         {
-            if (pullResult == null)
-            {
-                Clear();
-                return;
-            }
+            if (pullResult == null) { Clear(); return; }
 
             BaseCommitText.Text = "-";
             TargetCommitText.Text = "-";
@@ -53,7 +56,8 @@ namespace RevitVersionControl.UI
             ModifiedCountText.Text = summary.modified.ToString();
             DeletedCountText.Text = summary.deleted.ToString();
 
-            ChangesListView.ItemsSource = BuildChangeItems(pullResult.Changes);
+            _currentChanges = pullResult.Changes ?? new List<Change>();
+            ChangesListView.ItemsSource = BuildChangeItems(_currentChanges);
         }
 
         public void Clear()
@@ -64,6 +68,77 @@ namespace RevitVersionControl.UI
             ModifiedCountText.Text = "0";
             DeletedCountText.Text = "0";
             ChangesListView.ItemsSource = null;
+            _currentChanges.Clear();
+        }
+
+        private void SelectAll_Click(object sender, RoutedEventArgs e)
+        {
+            var items = ChangesListView.ItemsSource as List<ChangeItem>;
+            if (items == null) return;
+            foreach (var item in items)
+                item.IsSelected = true;
+            ChangesListView.Items.Refresh();
+        }
+
+        private void DeselectAll_Click(object sender, RoutedEventArgs e)
+        {
+            var items = ChangesListView.ItemsSource as List<ChangeItem>;
+            if (items == null) return;
+            foreach (var item in items)
+                item.IsSelected = false;
+            ChangesListView.Items.Refresh();
+        }
+
+        private void Highlight_Click(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("Highlight in View is not yet implemented.", "Info",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void ApplySelected_Click(object sender, RoutedEventArgs e)
+        {
+            var items = ChangesListView.ItemsSource as List<ChangeItem>;
+            if (items == null || !items.Any(i => i.IsSelected))
+            {
+                MessageBox.Show("No changes selected.", "Apply Selected",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_currentDocument == null)
+            {
+                MessageBox.Show("No active Revit document. Please use Pull Changes to apply changes.",
+                    "Apply Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var selectedElementIds = items
+                .Where(i => i.IsSelected)
+                .Select(i => i.ElementId)
+                .ToHashSet();
+
+            var selectedChanges = _currentChanges
+                .Where(c => selectedElementIds.Contains(c.ElementId))
+                .ToList();
+
+            try
+            {
+                var applier = new ElementApplier(_currentDocument);
+                var result = applier.ApplyChanges(selectedChanges);
+
+                string msg = $"Applied: {result.AppliedCount}\nSkipped: {result.SkippedCount}";
+                if (result.Errors.Count > 0)
+                    msg += $"\nWarnings: {result.Errors.Count}\n" + string.Join("\n", result.Errors.Take(3));
+
+                MessageBox.Show(msg, result.Success ? "Success" : "Completed with errors",
+                    MessageBoxButton.OK,
+                    result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to apply changes: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private List<ChangeItem> BuildChangeItems(List<Change> changes)
@@ -77,7 +152,8 @@ namespace RevitVersionControl.UI
                     StatusColor = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
                     ElementType = "No changes",
                     Description = "No changes available",
-                    Details = ""
+                    Details = "",
+                    IsSelected = false
                 });
                 return items;
             }
@@ -91,7 +167,8 @@ namespace RevitVersionControl.UI
                     ElementType = $"{change.Category}: {change.Type}",
                     Description = BuildDescription(change),
                     Details = BuildDetails(change),
-                    ElementId = change.ElementId
+                    ElementId = change.ElementId,
+                    IsSelected = true
                 });
             }
 
@@ -100,46 +177,22 @@ namespace RevitVersionControl.UI
 
         private static (int added, int modified, int deleted) Summarize(List<Change> changes)
         {
-            int added = 0;
-            int modified = 0;
-            int deleted = 0;
-
-            if (changes == null)
-            {
-                return (0, 0, 0);
-            }
-
-            foreach (var change in changes)
-            {
-                switch (change.ChangeType)
-                {
-                    case "added":
-                        added++;
-                        break;
-                    case "modified":
-                        modified++;
-                        break;
-                    case "deleted":
-                        deleted++;
-                        break;
-                }
-            }
-
-            return (added, modified, deleted);
+            if (changes == null) return (0, 0, 0);
+            return (
+                changes.Count(c => c.ChangeType == "added"),
+                changes.Count(c => c.ChangeType == "modified"),
+                changes.Count(c => c.ChangeType == "deleted")
+            );
         }
 
         private static string GetShortChangeType(string changeType)
         {
             switch (changeType)
             {
-                case "added":
-                    return "ADD";
-                case "modified":
-                    return "MOD";
-                case "deleted":
-                    return "DEL";
-                default:
-                    return changeType?.ToUpperInvariant() ?? "-";
+                case "added": return "ADD";
+                case "modified": return "MOD";
+                case "deleted": return "DEL";
+                default: return changeType?.ToUpperInvariant() ?? "-";
             }
         }
 
@@ -147,13 +200,13 @@ namespace RevitVersionControl.UI
         {
             switch (changeType)
             {
-                case "added":
+                case "added": 
                     return new SolidColorBrush(Color.FromRgb(40, 167, 69));
-                case "modified":
+                case "modified": 
                     return new SolidColorBrush(Color.FromRgb(255, 193, 7));
-                case "deleted":
+                case "deleted": 
                     return new SolidColorBrush(Color.FromRgb(220, 53, 69));
-                default:
+                default: 
                     return new SolidColorBrush(Color.FromRgb(160, 160, 160));
             }
         }
@@ -182,28 +235,33 @@ namespace RevitVersionControl.UI
                     .Select(p => $"{p.Name}: {p.OldValue} → {p.NewValue}");
                 details.Add(string.Join("; ", preview));
             }
-
-            if (change.GeometryChanged)
-            {
-                details.Add("Geometry changed");
-            }
-
-            if (change.LocationChanged)
-            {
-                details.Add("Location changed");
-            }
-
+            if (change.GeometryChanged) details.Add("Geometry changed");
+            if (change.LocationChanged) details.Add("Location changed");
             return string.Join(" | ", details);
         }
 
-        private class ChangeItem
+        public class ChangeItem : INotifyPropertyChanged
         {
+            private bool _isSelected;
+
             public string ChangeType { get; set; }
             public Brush StatusColor { get; set; }
             public string ElementType { get; set; }
             public string Description { get; set; }
             public string Details { get; set; }
             public string ElementId { get; set; }
+
+            public bool IsSelected
+            {
+                get => _isSelected;
+                set
+                {
+                    _isSelected = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+                }
+            }
+
+            public event PropertyChangedEventHandler PropertyChanged;
         }
     }
 }
