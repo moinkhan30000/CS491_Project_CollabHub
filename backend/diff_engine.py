@@ -123,16 +123,8 @@ class DiffEngine:
             parameterChanges=param_changes,
             geometryChanged=geometry_changed,
             locationChanged=location_changed,
-            oldData={
-                "parameters": {k: v.model_dump() for k, v in base.parameters.items()},
-                "geometry": base.geometry.model_dump() if base.geometry else None,
-                "location": base.location.model_dump() if base.location else None
-            },
-            newData={
-                "parameters": {k: v.model_dump() for k, v in target.parameters.items()},
-                "geometry": target.geometry.model_dump() if target.geometry else None,
-                "location": target.location.model_dump() if target.location else None
-            }
+            oldData=base.model_dump(),
+            newData=target.model_dump()
         )
     
     def _compare_parameters(

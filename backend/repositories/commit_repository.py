@@ -155,7 +155,7 @@ class CommitRepository:
         Walk backwards from target_commit_id through parentCommit links.
         If current_commit_id is found in the chain without crossing a
         full-snapshot boundary, collect every stored delta along the way
-        and return them in forward order (oldest : newest).
+        and return them in forward order (oldest to newest).
 
         Returns None when:
           - the chain exceeds _MAX_CHAIN_WALK steps
