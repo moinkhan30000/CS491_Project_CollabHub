@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlmodel import SQLModel, Field, Column, JSON
-from typing import Dict, Any, Optional
 
 # 1. Base Class: Shared fields (No table=True here)
 class CommitBase(SQLModel):
@@ -13,12 +12,17 @@ class CommitBase(SQLModel):
     parentCommit: Optional[str] = Field(default=None, foreign_key="commit.commitId")
     elementCount: int
     changedElements: int
-    changeType: str = Field(default="MOD") # ADD, MOD, DEL
+    changeType: str = Field(default="MOD")  # ADD, MOD, DEL
 
 # 2. Database Table: Inherits Base + adds Primary Key
 class Commit(CommitBase, table=True):
     commitId: str = Field(primary_key=True)
-    
-    # Pointer to Object Storage (S3/Blob) instead of JSON blob
+
     storageUrl: Optional[str] = None
+
+    # True  :snapshot column holds a full ElementSnapshot (root commit)
+    # False :snapshot column holds List[Change] (delta commit)
+    isFullSnapshot: bool = Field(default=True)
+
+    # Holds either ElementSnapshot JSON or List[Change] JSON depending on isFullSnapshot
     snapshot: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))

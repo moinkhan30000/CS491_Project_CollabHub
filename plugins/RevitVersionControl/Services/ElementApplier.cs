@@ -153,7 +153,8 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                Element element = _document.GetElement(change.ElementId);
+                Element element = null;
+                try { element = _document.GetElement(change.ElementId); } catch { }
 
                 if (element == null)
                 {
