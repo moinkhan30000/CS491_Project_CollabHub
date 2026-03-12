@@ -12,13 +12,16 @@ namespace RevitVersionControl.Services
     public class ElementApplier
     {
         private readonly Document _document;
-        private int _appliedCount = 0;
-        private int _skippedCount = 0;
-        private List<string> _errors = new List<string>();
+        private readonly ElementCreator _creator;
+        private int _appliedCount;
+        private int _skippedCount;
+        private List<string> _errors;
+        private List<string> _unsupportedElements;
 
         public ElementApplier(Document document)
         {
             _document = document;
+            _creator  = new ElementCreator(document);
         }
 
         public class ApplyResult
@@ -28,25 +31,44 @@ namespace RevitVersionControl.Services
             public int SkippedCount { get; set; }
             public int ErrorCount { get; set; }
             public List<string> Errors { get; set; }
+            public List<string> UnsupportedElements { get; set; }
             public string Summary { get; set; }
         }
 
+        // -----------------------------------------------------------------------
+        // Public API
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Returns family names required by incoming "added" changes that are
+        /// not loaded in the document. Call this before ApplyChanges to warn
+        /// the user proactively.
+        /// </summary>
+        public List<string> GetMissingFamilies(List<Change> changes) =>
+            _creator.GetMissingFamilies(changes);
+
+        /// <summary>
+        /// Apply a list of changes (added / modified / deleted) to the document
+        /// inside a single transaction.
+        /// </summary>
         public ApplyResult ApplyChanges(List<Change> changes)
         {
-            _appliedCount = 0;
-            _skippedCount = 0;
-            _errors = new List<string>();
+            _appliedCount      = 0;
+            _skippedCount      = 0;
+            _errors            = new List<string>();
+            _unsupportedElements = new List<string>();
 
             if (changes == null || changes.Count == 0)
             {
                 return new ApplyResult
                 {
-                    Success = true,
-                    AppliedCount = 0,
-                    SkippedCount = 0,
-                    ErrorCount = 0,
-                    Errors = new List<string>(),
-                    Summary = "No changes to apply."
+                    Success            = true,
+                    AppliedCount       = 0,
+                    SkippedCount       = 0,
+                    ErrorCount         = 0,
+                    Errors             = new List<string>(),
+                    UnsupportedElements = new List<string>(),
+                    Summary            = "No changes to apply."
                 };
             }
 
@@ -69,12 +91,14 @@ namespace RevitVersionControl.Services
 
                     return new ApplyResult
                     {
-                        Success = true,
-                        AppliedCount = _appliedCount,
-                        SkippedCount = _skippedCount,
-                        ErrorCount = _errors.Count,
-                        Errors = _errors,
-                        Summary = $"Applied {_appliedCount}, Skipped {_skippedCount}, Errors {_errors.Count}"
+                        Success             = true,
+                        AppliedCount        = _appliedCount,
+                        SkippedCount        = _skippedCount,
+                        ErrorCount          = _errors.Count,
+                        Errors              = _errors,
+                        UnsupportedElements = _unsupportedElements,
+                        Summary = $"Applied {_appliedCount}, Skipped {_skippedCount}, " +
+                                  $"Unsupported {_unsupportedElements.Count}, Errors {_errors.Count}"
                     };
                 }
                 catch (Exception ex)
@@ -83,23 +107,27 @@ namespace RevitVersionControl.Services
                     _errors.Add($"Transaction failed: {ex.Message}");
                     return new ApplyResult
                     {
-                        Success = false,
-                        AppliedCount = _appliedCount,
-                        SkippedCount = _skippedCount,
-                        ErrorCount = _errors.Count,
-                        Errors = _errors,
+                        Success             = false,
+                        AppliedCount        = _appliedCount,
+                        SkippedCount        = _skippedCount,
+                        ErrorCount          = _errors.Count,
+                        Errors              = _errors,
+                        UnsupportedElements = _unsupportedElements,
                         Summary = $"Failed. Rolled back. Error: {ex.Message}"
                     };
                 }
             }
         }
 
+        // -----------------------------------------------------------------------
+        // Private apply methods
+        // -----------------------------------------------------------------------
+
         private void ApplyDelete(Change change)
         {
             try
             {
-                Element element = null;
-                try { element = _document.GetElement(change.ElementId); } catch { }
+                Element element = _document.GetElement(change.ElementId);
 
                 if (element != null && !element.Pinned)
                 {
@@ -125,8 +153,7 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                Element element = null;
-                try { element = _document.GetElement(change.ElementId); } catch { }
+                Element element = _document.GetElement(change.ElementId);
 
                 if (element == null)
                 {
@@ -165,35 +192,34 @@ namespace RevitVersionControl.Services
                 }
 
                 var newData = JObject.FromObject(change.NewData);
-                string category = newData["category"]?.ToString() ?? "";
-                string familyName = newData["familyName"]?.ToString() ?? "";
-                string typeName = newData["typeName"]?.ToString() ?? "";
-                var locationData = newData["location"] as JObject;
 
-                // Route to correct creation method by category
-                Element created = null;
+                // Delegate all creation logic to ElementCreator
+                CreationResult result = _creator.Create(newData);
 
-                if (category == "Walls")
-                    created = CreateWall(newData, locationData);
-                else if (category == "Floors")
-                    created = CreateFloor(newData, locationData);
-                else
-                    created = CreateFamilyInstance(familyName, typeName, locationData, newData);
-
-                if (created != null)
-                {
-                    // Apply parameters after creation
-                    var parameters = newData["parameters"] as JObject;
-                    if (parameters != null)
-                        ApplyParametersFromJObject(created, parameters);
-
-                    _appliedCount++;
-                }
-                else
+                if (result.IsUnsupported)
                 {
                     _skippedCount++;
-                    _errors.Add($"Add: Could not create {category} '{familyName}:{typeName}' ({change.ElementId})");
+                    _unsupportedElements.Add($"[{change.ElementId}] {result.Reason}");
+                    return;
                 }
+
+                if (result.Element == null)
+                {
+                    _skippedCount++;
+                    _errors.Add($"Add failed for {change.ElementId}: {result.Reason}");
+                    return;
+                }
+
+                // Apply parameters to the newly created element
+                var parameters = newData["parameters"] as JObject;
+                if (parameters != null)
+                    ApplyParametersFromJObject(result.Element, parameters);
+
+                // Surface placement warnings (e.g. hosted fallback) without failing
+                if (!string.IsNullOrEmpty(result.Reason))
+                    _errors.Add($"Add warning for {change.ElementId}: {result.Reason}");
+
+                _appliedCount++;
             }
             catch (Exception ex)
             {
@@ -202,144 +228,9 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private Element CreateWall(JObject newData, JObject locationData)
-        {
-            if (locationData == null) return null;
-
-            var startPt = locationData["startPoint"] as JObject;
-            var endPt = locationData["endPoint"] as JObject;
-            if (startPt == null || endPt == null) return null;
-
-            var start = new XYZ(
-                startPt["x"]?.Value<double>() ?? 0,
-                startPt["y"]?.Value<double>() ?? 0,
-                startPt["z"]?.Value<double>() ?? 0);
-
-            var end = new XYZ(
-                endPt["x"]?.Value<double>() ?? 0,
-                endPt["y"]?.Value<double>() ?? 0,
-                endPt["z"]?.Value<double>() ?? 0);
-
-            if (start.DistanceTo(end) < 0.01) return null;
-
-            // Find wall type by typeName
-            string typeName = newData["typeName"]?.ToString() ?? "";
-            WallType wallType = new FilteredElementCollector(_document)
-                .OfClass(typeof(WallType))
-                .Cast<WallType>()
-                .FirstOrDefault(wt => wt.Name == typeName)
-                ?? new FilteredElementCollector(_document)
-                    .OfClass(typeof(WallType))
-                    .Cast<WallType>()
-                    .FirstOrDefault();
-
-            if (wallType == null) return null;
-
-            // Find level
-            Level level = GetNearestLevel(start.Z);
-            if (level == null) return null;
-
-            Line line = Line.CreateBound(start, end);
-            return Wall.Create(_document, line, wallType.Id, level.Id, 10.0, 0, false, false);
-        }
-
-        private Element CreateFloor(JObject newData, JObject locationData)
-        {
-            var geometry = newData["geometry"] as JObject;
-            var bbox = geometry?["boundingBox"] as JObject;
-            if (bbox == null) return null;
-
-            var min = bbox["min"] as JObject;
-            var max = bbox["max"] as JObject;
-            if (min == null || max == null) return null;
-
-            double x1 = min["x"]?.Value<double>() ?? 0;
-            double y1 = min["y"]?.Value<double>() ?? 0;
-            double z  = min["z"]?.Value<double>() ?? 0;
-            double x2 = max["x"]?.Value<double>() ?? 0;
-            double y2 = max["y"]?.Value<double>() ?? 0;
-
-            string typeName = newData["typeName"]?.ToString() ?? "";
-            FloorType floorType = new FilteredElementCollector(_document)
-                .OfClass(typeof(FloorType))
-                .Cast<FloorType>()
-                .FirstOrDefault(ft => ft.Name == typeName)
-                ?? new FilteredElementCollector(_document)
-                    .OfClass(typeof(FloorType))
-                    .Cast<FloorType>()
-                    .FirstOrDefault();
-
-            if (floorType == null) return null;
-
-            Level level = GetNearestLevel(z);
-            if (level == null) return null;
-
-            var curveLoop = new CurveLoop();
-            curveLoop.Append(Line.CreateBound(new XYZ(x1, y1, z), new XYZ(x2, y1, z)));
-            curveLoop.Append(Line.CreateBound(new XYZ(x2, y1, z), new XYZ(x2, y2, z)));
-            curveLoop.Append(Line.CreateBound(new XYZ(x2, y2, z), new XYZ(x1, y2, z)));
-            curveLoop.Append(Line.CreateBound(new XYZ(x1, y2, z), new XYZ(x1, y1, z)));
-
-            return Floor.Create(_document, new List<CurveLoop> { curveLoop }, floorType.Id, level.Id);
-        }
-
-        private Element CreateFamilyInstance(string familyName, string typeName, JObject locationData, JObject newData)
-        {
-            // Find family symbol by familyName + typeName
-            FamilySymbol symbol = new FilteredElementCollector(_document)
-                .OfClass(typeof(FamilySymbol))
-                .Cast<FamilySymbol>()
-                .FirstOrDefault(fs =>
-                    fs.FamilyName == familyName && fs.Name == typeName)
-                ?? new FilteredElementCollector(_document)
-                    .OfClass(typeof(FamilySymbol))
-                    .Cast<FamilySymbol>()
-                    .FirstOrDefault(fs => fs.FamilyName == familyName);
-
-            if (symbol == null) return null;
-
-            if (!symbol.IsActive)
-                symbol.Activate();
-
-            Level level = null;
-            XYZ location = XYZ.Zero;
-
-            if (locationData != null)
-            {
-                string locType = locationData["type"]?.ToString();
-                if (locType == "point")
-                {
-                    var pt = locationData["point"] as JObject;
-                    if (pt != null)
-                    {
-                        location = new XYZ(
-                            pt["x"]?.Value<double>() ?? 0,
-                            pt["y"]?.Value<double>() ?? 0,
-                            pt["z"]?.Value<double>() ?? 0);
-                    }
-                }
-                level = GetNearestLevel(location.Z);
-            }
-
-            level = level ?? new FilteredElementCollector(_document)
-                .OfClass(typeof(Level))
-                .Cast<Level>()
-                .FirstOrDefault();
-
-            if (level == null) return null;
-
-            return _document.Create.NewFamilyInstance(
-                location, symbol, level, StructuralType.NonStructural);
-        }
-
-        private Level GetNearestLevel(double elevation)
-        {
-            return new FilteredElementCollector(_document)
-                .OfClass(typeof(Level))
-                .Cast<Level>()
-                .OrderBy(l => Math.Abs(l.Elevation - elevation))
-                .FirstOrDefault();
-        }
+        // -----------------------------------------------------------------------
+        // Parameter helpers (unchanged)
+        // -----------------------------------------------------------------------
 
         private bool ApplyParameterChanges(Element element, List<ParameterChange> paramChanges)
         {
