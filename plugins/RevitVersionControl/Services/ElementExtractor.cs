@@ -20,10 +20,6 @@ namespace RevitVersionControl.Services
         public bool LogProgress { get; set; } = true;
     }
 
-    /// <summary>
-    /// Extracts element-level data from Revit model
-    /// Converts elements to JSON-serializable format
-    /// </summary>
     public class ElementExtractor
     {
         private readonly Document _document;
@@ -33,24 +29,17 @@ namespace RevitVersionControl.Services
             _document = document;
         }
 
-        /// <summary>
-        /// Extract all elements from the current model
-        /// </summary>
         public List<JObject> ExtractAllElements()
         {
             return ExtractAllElements(new ExtractionOptions());
         }
 
-        /// <summary>
-        /// Extract all elements with configurable throttling/logging options
-        /// </summary>
         public List<JObject> ExtractAllElements(ExtractionOptions options)
         {
             var elements = new List<JObject>();
             var extractionOptions = options ?? new ExtractionOptions();
             int processed = 0;
 
-            // Get all model elements (excluding views, sheets, etc.)
             FilteredElementCollector collector = new FilteredElementCollector(_document)
                 .WhereElementIsNotElementType()
                 .WhereElementIsViewIndependent();
@@ -112,9 +101,6 @@ namespace RevitVersionControl.Services
             return elements;
         }
 
-        /// <summary>
-        /// Extract data from a single element
-        /// </summary>
         public JObject ExtractElement(Element element, bool includeGeometry)
         {
             if (element == null)
@@ -133,50 +119,38 @@ namespace RevitVersionControl.Services
             var parameters = ExtractParameters(element);
             var location = ExtractLocation(element);
             if (location != null && !location.HasValues)
-            {
                 location = null;
-            }
 
             var elementData = new JObject
             {
-                ["id"] = element.UniqueId,
-                ["category"] = element.Category?.Name ?? "Unknown",
-                ["type"] = GetElementTypeName(element),
+                ["id"]         = element.UniqueId,
+                ["category"]   = element.Category?.Name ?? "Unknown",
+                ["type"]       = GetElementTypeName(element),
                 ["parameters"] = parameters,
-                ["location"] = location,
-                ["geometry"] = includeGeometry ? ExtractGeometry(element, location) : null
+                ["location"]   = location,
+                ["geometry"]   = includeGeometry ? ExtractGeometry(element, location) : null
             };
 
             var typeInfo = GetElementTypeInfo(element);
             if (typeInfo.HasValue)
             {
                 elementData["familyName"] = typeInfo.Value.FamilyName;
-                elementData["typeName"] = typeInfo.Value.TypeName;
+                elementData["typeName"]   = typeInfo.Value.TypeName;
             }
 
-            // Add optional properties
             if (element.WorksetId != null && element.WorksetId != WorksetId.InvalidWorksetId)
-            {
                 elementData["worksetId"] = element.WorksetId.ToString();
-            }
 
             if (element.LevelId != null && element.LevelId != ElementId.InvalidElementId)
-            {
                 elementData["levelId"] = element.LevelId.ToString();
-            }
 
-            // Phase information
             var phaseCreated = element.get_Parameter(BuiltInParameter.PHASE_CREATED);
             if (phaseCreated != null && phaseCreated.HasValue)
-            {
                 elementData["phaseCreated"] = GetPhaseName(phaseCreated.AsElementId());
-            }
 
             var phaseDemolished = element.get_Parameter(BuiltInParameter.PHASE_DEMOLISHED);
             if (phaseDemolished != null && phaseDemolished.HasValue)
-            {
                 elementData["phaseDemolished"] = GetPhaseName(phaseDemolished.AsElementId());
-            }
 
             return elementData;
         }
@@ -199,21 +173,60 @@ namespace RevitVersionControl.Services
 
                     var paramData = new JObject
                     {
-                        ["value"] = JToken.FromObject(GetParameterValue(param)),
-                        ["type"] = param.Definition.GetDataType().TypeId ?? "Unknown",
-                        ["isReadOnly"] = param.IsReadOnly,
+                        ["value"]       = JToken.FromObject(GetParameterValue(param)),
+                        ["type"]        = param.Definition.GetDataType().TypeId ?? "Unknown",
+                        ["isReadOnly"]  = param.IsReadOnly,
                         ["storageType"] = param.StorageType.ToString()
                     };
+
+                    // For ElementId parameters, also store the human-readable name of the
+                    // referenced element so the receiving model can look it up by name
+                    // instead of relying on the local integer ID which differs per model.
+                    if (param.StorageType == StorageType.ElementId)
+                    {
+                        string referencedName = GetElementIdParamName(param.AsElementId());
+                        if (referencedName != null)
+                            paramData["elementName"] = referencedName;
+                    }
 
                     parameters[param.Definition.Name] = paramData;
                 }
                 catch
                 {
-                    // Skip parameters that can't be read
+                    // Skip parameters that cannot be read
                 }
             }
 
             return parameters;
+        }
+
+        /// <summary>
+        /// Resolves an ElementId to a human-readable name for cross-model lookup.
+        /// Tries ElementType name first (covers wall types, floor types, family types),
+        /// then falls back to the element's own Name property.
+        /// </summary>
+        private string GetElementIdParamName(ElementId elementId)
+        {
+            if (elementId == null || elementId == ElementId.InvalidElementId)
+                return null;
+
+            try
+            {
+                Element referenced = _document.GetElement(elementId);
+                if (referenced == null)
+                    return null;
+
+                // ElementType covers WallType, FloorType, FamilySymbol, etc.
+                if (referenced is ElementType elementType)
+                    return elementType.FamilyName + " : " + elementType.Name;
+
+                // Level, Phase, Material and other named elements
+                if (!string.IsNullOrEmpty(referenced.Name))
+                    return referenced.Name;
+            }
+            catch { }
+
+            return null;
         }
 
         private object GetParameterValue(Parameter param)
@@ -249,18 +262,8 @@ namespace RevitVersionControl.Services
                 {
                     geometryData["boundingBox"] = new JObject
                     {
-                        ["min"] = new JObject
-                        {
-                            ["x"] = bbox.Min.X,
-                            ["y"] = bbox.Min.Y,
-                            ["z"] = bbox.Min.Z
-                        },
-                        ["max"] = new JObject
-                        {
-                            ["x"] = bbox.Max.X,
-                            ["y"] = bbox.Max.Y,
-                            ["z"] = bbox.Max.Z
-                        }
+                        ["min"] = new JObject { ["x"] = bbox.Min.X, ["y"] = bbox.Min.Y, ["z"] = bbox.Min.Z },
+                        ["max"] = new JObject { ["x"] = bbox.Max.X, ["y"] = bbox.Max.Y, ["z"] = bbox.Max.Z }
                     };
                 }
 
@@ -291,19 +294,14 @@ namespace RevitVersionControl.Services
                 if (location is LocationPoint locationPoint)
                 {
                     XYZ point = locationPoint.Point;
-                    locationData["type"] = "point";
-                    locationData["point"] = new JObject
-                    {
-                        ["x"] = point.X,
-                        ["y"] = point.Y,
-                        ["z"] = point.Z
-                    };
+                    locationData["type"]     = "point";
+                    locationData["point"]    = new JObject { ["x"] = point.X, ["y"] = point.Y, ["z"] = point.Z };
                     locationData["rotation"] = locationPoint.Rotation;
                 }
                 else if (location is LocationCurve locationCurve)
                 {
                     Curve curve = locationCurve.Curve;
-                    locationData["type"] = "curve";
+                    locationData["type"]       = "curve";
                     locationData["startPoint"] = new JObject
                     {
                         ["x"] = curve.GetEndPoint(0).X,
@@ -318,10 +316,7 @@ namespace RevitVersionControl.Services
                     };
                 }
             }
-            catch
-            {
-                // Location extraction failed
-            }
+            catch { }
 
             return locationData;
         }
@@ -335,9 +330,7 @@ namespace RevitVersionControl.Services
                 {
                     ElementType elemType = _document.GetElement(typeId) as ElementType;
                     if (elemType != null)
-                    {
                         return elemType.FamilyName + ": " + elemType.Name;
-                    }
                 }
             }
             catch { }
@@ -354,15 +347,10 @@ namespace RevitVersionControl.Services
                 {
                     ElementType elemType = _document.GetElement(typeId) as ElementType;
                     if (elemType != null)
-                    {
                         return (elemType.FamilyName, elemType.Name);
-                    }
                 }
             }
-            catch
-            {
-                // Ignore failures
-            }
+            catch { }
 
             return null;
         }
@@ -411,7 +399,7 @@ namespace RevitVersionControl.Services
             using (var sha256 = SHA256.Create())
             {
                 byte[] bytes = Encoding.UTF8.GetBytes(builder.ToString());
-                byte[] hash = sha256.ComputeHash(bytes);
+                byte[] hash  = sha256.ComputeHash(bytes);
                 return BitConverter.ToString(hash).Replace("-", "").Substring(0, 16).ToLowerInvariant();
             }
         }
@@ -428,16 +416,38 @@ namespace RevitVersionControl.Services
 
         private bool ShouldSkipElement(Element element)
         {
-            // Skip views, sheets, schedules, etc.
             if (element is View || element is ViewSheet || element is ScheduleSheetInstance)
                 return true;
-
-            // Skip element types
             if (element is ElementType)
                 return true;
-
-            // Skip sketch elements
             if (element.Category?.Name?.Contains("Sketch") == true)
+                return true;
+
+            // Skip system-generated analytical and host-child elements.
+            // Revit regenerates these automatically when their parent element
+            // is created or modified — they must never be tracked independently.
+            string category = element.Category?.Name ?? string.Empty;
+            if (category == "Analytical Nodes"
+                || category == "Analytical Links"
+                || category == "Analytical Floors"
+                || category == "Analytical Walls"
+                || category == "Analytical Columns"
+                || category == "Analytical Beams"
+                || category == "Analytical Braces"
+                || category == "Analytical Foundation Slabs"
+                || category == "Analytical Isolated Foundations"
+                || category == "Analytical Wall Foundations"
+                || category == "Analytical Spaces"
+                || category == "Analytical Surfaces"
+                || category == "Structural Connections"
+                || category == "Coordination Model"
+                || category == "gbXML Faces"
+                || category == "System-defined")
+                return true;
+
+            // Skip elements with no category at all — these are internal
+            // Revit bookkeeping objects with no spatial meaning.
+            if (element.Category == null)
                 return true;
 
             return false;
@@ -447,12 +457,20 @@ namespace RevitVersionControl.Services
         {
             if (element == null)
                 return false;
-
             if (element is Material)
                 return true;
 
             string category = element.Category?.Name ?? string.Empty;
             if (category == "RVT Links" || category == "Materials")
+                return true;
+
+            // Skip internal host-support elements that Revit manages automatically.
+            if (category == "Wall Sweeps"
+                || category == "Fascias"
+                || category == "Gutters"
+                || category == "Slab Edges"
+                || category == "Reveals"
+                || category == "Structural Stiffeners")
                 return true;
 
             string typeName = element.GetType().Name ?? string.Empty;
@@ -466,13 +484,13 @@ namespace RevitVersionControl.Services
         {
             return new JObject
             {
-                ["id"] = element.UniqueId,
-                ["category"] = element.Category?.Name ?? "Unknown",
-                ["type"] = element.GetType().Name ?? "Unknown",
-                ["name"] = element.Name ?? "Unknown",
+                ["id"]         = element.UniqueId,
+                ["category"]   = element.Category?.Name ?? "Unknown",
+                ["type"]       = element.GetType().Name ?? "Unknown",
+                ["name"]       = element.Name ?? "Unknown",
                 ["parameters"] = new JObject(),
-                ["location"] = null,
-                ["geometry"] = null
+                ["location"]   = null,
+                ["geometry"]   = null
             };
         }
 
@@ -487,7 +505,7 @@ namespace RevitVersionControl.Services
                 {
                     location = new JObject
                     {
-                        ["type"] = "transform",
+                        ["type"]   = "transform",
                         ["origin"] = new JObject
                         {
                             ["x"] = transform.Origin.X,
@@ -522,13 +540,13 @@ namespace RevitVersionControl.Services
 
             return new JObject
             {
-                ["id"] = linkInstance.UniqueId,
-                ["category"] = linkInstance.Category?.Name ?? "RVT Links",
-                ["type"] = linkInstance.GetType().Name ?? "RevitLinkInstance",
-                ["name"] = linkInstance.Name ?? "Link",
+                ["id"]         = linkInstance.UniqueId,
+                ["category"]   = linkInstance.Category?.Name ?? "RVT Links",
+                ["type"]       = linkInstance.GetType().Name ?? "RevitLinkInstance",
+                ["name"]       = linkInstance.Name ?? "Link",
                 ["parameters"] = new JObject(),
-                ["location"] = location,
-                ["geometry"] = null
+                ["location"]   = location,
+                ["geometry"]   = null
             };
         }
 
@@ -543,24 +561,16 @@ namespace RevitVersionControl.Services
                 var path = Path.Combine(baseDir, "extractor.log");
                 File.AppendAllText(path, $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
             }
-            catch
-            {
-                // Ignore logging failures
-            }
+            catch { }
         }
 
         private static string DescribeElement(Element element)
         {
-            if (element == null)
-            {
-                return "null element";
-            }
-
-            string category = element.Category?.Name ?? "UnknownCategory";
-            string typeName = element.GetType().Name ?? "UnknownType";
-            string name = element.Name ?? "UnknownName";
-            string uniqueId = element.UniqueId ?? "UnknownId";
-
+            if (element == null) return "null element";
+            string category  = element.Category?.Name ?? "UnknownCategory";
+            string typeName  = element.GetType().Name ?? "UnknownType";
+            string name      = element.Name ?? "UnknownName";
+            string uniqueId  = element.UniqueId ?? "UnknownId";
             return $"Id={element.Id.Value} UniqueId={uniqueId} Category={category} Type={typeName} Name={name}";
         }
     }

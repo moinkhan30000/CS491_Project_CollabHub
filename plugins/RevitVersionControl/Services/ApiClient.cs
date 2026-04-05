@@ -104,34 +104,33 @@ namespace RevitVersionControl.Services
 
         public async Task<Project> InitProjectAsync(string name, string filePath)
         {
-                using (var content = new MultipartFormDataContent())
+            using (var content = new MultipartFormDataContent())
+            {
+                content.Add(new StringContent(name), "name");
+                content.Add(new StringContent(filePath), "modelId");
+
+                using (var fileStream = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))
                 {
-                    content.Add(new StringContent(name), "name");
-                    
-                // Copy file to memory stream using FileShare.ReadWrite to allow reading open files
-                    using (var fileStream = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))
+                    var memoryStream = new System.IO.MemoryStream();
+                    await fileStream.CopyToAsync(memoryStream).ConfigureAwait(false);
+                    memoryStream.Position = 0;
+
+                    var fileContent = new ByteArrayContent(memoryStream.ToArray());
+                    fileContent.Headers.Add("Content-Type", "application/octet-stream");
+                    content.Add(fileContent, "file", System.IO.Path.GetFileName(filePath));
+
+                    var response = await _httpClient.PostAsync(_baseUrl + "/projects/init", content).ConfigureAwait(false);
+
+                    if (!response.IsSuccessStatusCode)
                     {
-                        var memoryStream = new System.IO.MemoryStream();
-                        await fileStream.CopyToAsync(memoryStream).ConfigureAwait(false);
-                        memoryStream.Position = 0;
-
-                        var fileContent = new ByteArrayContent(memoryStream.ToArray());
-                        fileContent.Headers.Add("Content-Type", "application/octet-stream");
-                        content.Add(fileContent, "file", System.IO.Path.GetFileName(filePath));
-
-                        var response = await _httpClient.PostAsync(_baseUrl + "/projects/init", content).ConfigureAwait(false);
-                        
-                        // Check status manually to give better error on 404/500
-                        if (!response.IsSuccessStatusCode)
-                        {
-                            var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            throw new HttpRequestException($"Server Error {response.StatusCode}: {errorContent}");
-                        }
-
-                        var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        return JsonConvert.DeserializeObject<Project>(responseContent);
+                        var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        throw new HttpRequestException($"Server Error {response.StatusCode}: {errorContent}");
                     }
+
+                    var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return JsonConvert.DeserializeObject<Project>(responseContent);
                 }
+            }
         }
 
         public async Task<bool> InviteUserAsync(string projectId, string email)
@@ -512,6 +511,9 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("type")]
         public string Type { get; set; }
+
+        [JsonProperty("elementName")]
+        public string ElementName { get; set; }
     }
 
     public class PullResult

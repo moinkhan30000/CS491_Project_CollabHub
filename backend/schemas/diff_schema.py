@@ -7,6 +7,7 @@ class ParameterChange(BaseModel):
     oldValue: Any
     newValue: Any
     type: str
+    elementName: Optional[str] = None
 
 class Change(BaseModel):
     changeType: Literal["added", "modified", "deleted"]

@@ -249,17 +249,43 @@ namespace RevitVersionControl.Services
                             if (double.TryParse(paramChange.NewValue.ToString(), out double d))
                             { param.Set(d); changed = true; }
                             break;
+
                         case StorageType.Integer:
                             if (int.TryParse(paramChange.NewValue.ToString(), out int i))
                             { param.Set(i); changed = true; }
                             break;
+
                         case StorageType.String:
                             param.Set(paramChange.NewValue.ToString());
                             changed = true;
                             break;
+
                         case StorageType.ElementId:
-                            if (int.TryParse(paramChange.NewValue.ToString(), out int eid))
-                            { param.Set(new ElementId(eid)); changed = true; }
+                            // Prefer name-based lookup over raw integer ID.
+                            // The integer ID is local to each Revit file and will be
+                            // different on the receiving user's model. elementName is
+                            // the human-readable name stored during extraction.
+                            if (!string.IsNullOrEmpty(paramChange.ElementName))
+                            {
+                                ElementId resolvedId = ResolveElementIdByName(paramChange.ElementName);
+                                if (resolvedId != null)
+                                {
+                                    param.Set(resolvedId);
+                                    changed = true;
+                                    break;
+                                }
+                                // Name lookup failed — log and skip rather than
+                                // applying the wrong integer ID from the source model.
+                                _errors.Add(
+                                    $"Parameter '{paramChange.Name}': " +
+                                    $"could not find element named '{paramChange.ElementName}' in this model.");
+                            }
+                            else if (int.TryParse(paramChange.NewValue.ToString(), out int eid))
+                            {
+                                // Fallback for old data that has no elementName stored.
+                                param.Set(new ElementId(eid));
+                                changed = true;
+                            }
                             break;
                     }
                 }
@@ -269,6 +295,47 @@ namespace RevitVersionControl.Services
                 }
             }
             return changed;
+        }
+
+        /// <summary>
+        /// Resolves a stored element name back to a local ElementId.
+        /// Searches ElementTypes first (WallType, FloorType, FamilySymbol, etc.)
+        /// then falls back to named elements (Level, Phase, Material).
+        /// The name format from extraction is "FamilyName : TypeName" for types
+        /// and plain Name for everything else.
+        /// </summary>
+        private ElementId ResolveElementIdByName(string elementName)
+        {
+            if (string.IsNullOrEmpty(elementName))
+                return null;
+
+            try
+            {
+                // ElementType — covers WallType, FloorType, FamilySymbol, RoofType etc.
+                // Stored format: "FamilyName : TypeName"
+                var typeMatch = new FilteredElementCollector(_document)
+                    .OfClass(typeof(ElementType))
+                    .Cast<ElementType>()
+                    .FirstOrDefault(t =>
+                        (t.FamilyName + " : " + t.Name) == elementName ||
+                        t.Name == elementName);
+
+                if (typeMatch != null)
+                    return typeMatch.Id;
+
+                // Named elements — Level, Phase, Material, etc.
+                var namedMatch = new FilteredElementCollector(_document)
+                    .WhereElementIsNotElementType()
+                    .Cast<Element>()
+                    .FirstOrDefault(e =>
+                        !string.IsNullOrEmpty(e.Name) && e.Name == elementName);
+
+                if (namedMatch != null)
+                    return namedMatch.Id;
+            }
+            catch { }
+
+            return null;
         }
 
         private void ApplyParametersFromJObject(Element element, JObject parameters)
