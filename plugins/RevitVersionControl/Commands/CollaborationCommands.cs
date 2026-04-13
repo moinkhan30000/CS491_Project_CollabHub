@@ -32,6 +32,25 @@ namespace RevitVersionControl.Commands
                 string projectName = dialog.ProjectName;
                 string filePath = doc.PathName;
 
+                var extractor = new ElementExtractor(doc);
+                var extractionOptions = new ExtractionOptions
+                {
+                    BatchSize = 200,
+                    PauseMilliseconds = 10,
+                    IncludeGeometry = true,
+                    LogProgress = true
+                };
+                var elementData = extractor.ExtractAllElements(extractionOptions);
+                var initialSnapshot = new ElementSnapshot
+                {
+                    Version = "1.0",
+                    ModelId = filePath,
+                    Timestamp = DateTime.UtcNow,
+                    UserName = commandData.Application.Application.Username,
+                    CommitMessage = "Initial Base Snapshot",
+                    Elements = elementData.ConvertAll(e => (object)e)
+                };
+
                 // Use a simple task dialog to inform user? No, that blocks.
                 // Just use a WaitCursor.
                 // Set wait cursor manually using WPF
@@ -40,7 +59,7 @@ namespace RevitVersionControl.Commands
                 {
                     // Run on a background thread to prevent UI Deadlock.
                     // The UI thread is blocked by Wait(), so the async task MUST NOT try to use it.
-                    var task = Task.Run(() => ApiClient.Instance.InitProjectAsync(projectName, filePath));
+                    var task = Task.Run(() => ApiClient.Instance.InitProjectAsync(projectName, filePath, initialSnapshot));
 
                     // Wait 120 seconds
                     if (task.Wait(TimeSpan.FromSeconds(120)))
@@ -49,7 +68,28 @@ namespace RevitVersionControl.Commands
                         if (resultProject != null)
                         {
                             System.Windows.Input.Mouse.OverrideCursor = null;
-                            TaskDialog.Show("Success", $"Project '{resultProject.Name}' initialized!");
+                            if (!string.IsNullOrWhiteSpace(resultProject.BaseCommitId))
+                            {
+                                initialSnapshot.ProjectId = resultProject.ProjectId;
+                                initialSnapshot.ModelId = resultProject.ModelId ?? filePath;
+                                DocumentSyncStateService.SaveState(
+                                    filePath,
+                                    resultProject.ProjectId,
+                                    resultProject.ModelId ?? filePath,
+                                    resultProject.BaseCommitId);
+                                SnapshotCacheService.SaveSnapshot(
+                                    resultProject.ProjectId,
+                                    resultProject.ModelId ?? filePath,
+                                    resultProject.BaseCommitId,
+                                    initialSnapshot);
+                                TaskDialog.Show("Success", $"Project '{resultProject.Name}' initialized and base snapshot published!");
+                            }
+                            else
+                            {
+                                TaskDialog.Show("Partial Success",
+                                    $"Project '{resultProject.Name}' was initialized, but the initial base snapshot could not be published.\n\n" +
+                                    "Current-version tracking will be incomplete until the first successful publish.");
+                            }
                             HistoryPaneProvider.Instance?.ReloadProjects();
                             return Result.Succeeded;
                         }
@@ -123,13 +163,12 @@ namespace RevitVersionControl.Commands
                 try
                 {
                     string filePath = dialog.DownloadedFilePath;
-                    var app = commandData.Application.Application;
-                    
                     // Open the document
                     var modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath);
                     var openOptions = new OpenOptions();
-                    
-                    commandData.Application.OpenAndActivateDocument(modelPath, openOptions, false);
+
+                    var openedDocument = commandData.Application.OpenAndActivateDocument(modelPath, openOptions, false);
+                    PersistAcceptedTracking(dialog, openedDocument?.Document?.PathName ?? filePath);
                     
                     TaskDialog.Show("Success", $"Project opened: {System.IO.Path.GetFileName(filePath)}");
                 }
@@ -140,6 +179,73 @@ namespace RevitVersionControl.Commands
             }
             
             return Result.Succeeded;
+        }
+
+        private static void PersistAcceptedTracking(InvitationsDialog dialog, string openedDocumentPath)
+        {
+            if (dialog == null
+                || string.IsNullOrWhiteSpace(dialog.AcceptedProjectId)
+                || string.IsNullOrWhiteSpace(openedDocumentPath))
+            {
+                return;
+            }
+
+            try
+            {
+                string commitId = dialog.AcceptedBaseCommitId;
+                string modelId = dialog.AcceptedModelId;
+
+                if (string.IsNullOrWhiteSpace(commitId))
+                {
+                    var baseCommitTask = Task.Run(() =>
+                        ApiClient.Instance.GetBaseModelCommitAsync(dialog.AcceptedProjectId));
+
+                    if (!baseCommitTask.Wait(TimeSpan.FromSeconds(30)))
+                        return;
+
+                    var baseCommit = baseCommitTask.Result;
+                    if (baseCommit == null)
+                        return;
+
+                    commitId = baseCommit.CommitId;
+                    modelId = baseCommit.ModelId;
+                }
+
+                string canonicalModelId = string.IsNullOrWhiteSpace(modelId)
+                    ? openedDocumentPath
+                    : modelId;
+
+                DocumentSyncStateService.SaveState(
+                    openedDocumentPath,
+                    dialog.AcceptedProjectId,
+                    canonicalModelId,
+                    commitId);
+
+                if (SnapshotCacheService.GetSnapshot(dialog.AcceptedProjectId, canonicalModelId, commitId) == null)
+                {
+                    var snapshotTask = Task.Run(() =>
+                        ApiClient.Instance.GetSnapshotAsync(dialog.AcceptedProjectId, commitId));
+
+                    if (!snapshotTask.Wait(TimeSpan.FromSeconds(60)))
+                        return;
+
+                    var snapshot = snapshotTask.Result;
+                    if (snapshot == null)
+                        return;
+
+                    snapshot.ProjectId = dialog.AcceptedProjectId;
+                    snapshot.ModelId = canonicalModelId;
+                    SnapshotCacheService.SaveSnapshot(
+                        dialog.AcceptedProjectId,
+                        canonicalModelId,
+                        commitId,
+                        snapshot);
+                }
+            }
+            catch
+            {
+                // Ignore local onboarding tracking failures here. Pull/publish can still recover later.
+            }
         }
     }
 }

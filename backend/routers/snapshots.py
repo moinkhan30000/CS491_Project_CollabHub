@@ -1,22 +1,24 @@
-"""
+ï»¿"""
 Snapshots & Commits Router
-""" 
+"""
 
 from fastapi import APIRouter, HTTPException, status, Query, Depends
-from schemas.commit_schema import CommitCreate, CommitDetail, CommitSummary
-from schemas.element_schema import ElementSnapshot
-from entities.user_entity import User
-from repositories.project_repository import ProjectRepository
-from repositories.commit_repository import CommitRepository, _RESNAPSHOT_INTERVAL
-from repositories.user_repository import UserRepository
+
 from dependencies import get_current_user
 from diff_engine import DiffEngine
+from entities.user_entity import User
+from repositories.commit_repository import CommitRepository, _RESNAPSHOT_INTERVAL
+from repositories.project_repository import ProjectRepository
+from repositories.user_repository import UserRepository
+from schemas.commit_schema import CommitCreate, CommitDetail, CommitSummary, CommitPackageCreate
+from services.operation_engine import OperationEngine
 
 router = APIRouter()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
 user_repo = UserRepository()
 diff_engine = DiffEngine()
+operation_engine = OperationEngine()
 
 
 @router.post("/{project_id}/snapshots", response_model=CommitSummary, status_code=status.HTTP_201_CREATED)
@@ -25,22 +27,18 @@ async def create_snapshot(
     commit_data: CommitCreate,
     current_user: User = Depends(get_current_user),
 ):
-    """Publish a new snapshot (create commit)"""
+    """Publish a new snapshot (create commit)."""
     project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     user_id = current_user.userId
 
-    # Resolve parent commit
     parent_commit_id = commit_data.parentCommit
     if not parent_commit_id:
         latest = commit_repo.get_latest_commit_for_model(project_id, commit_data.modelId)
         parent_commit_id = latest.commitId if latest else None
 
-    # -----------------------------------------------------------------------
-    # ROOT commit — no parent exists yet, store full snapshot
-    # -----------------------------------------------------------------------
     if parent_commit_id is None:
         commit = commit_repo.create_commit(
             project_id=project_id,
@@ -49,16 +47,14 @@ async def create_snapshot(
             author=user_id,
             storage_url=None,
             parent_commit=None,
-            snapshot=commit_data.snapshot,       # full snapshot
+            snapshot=commit_data.snapshot,
             diff=None,
+            ops_payload=None,
             element_count=len(commit_data.snapshot.elements),
             changed_elements=len(commit_data.snapshot.elements),
         )
         return _build_summary(commit, user_id, user_repo, commit_data)
 
-    # -----------------------------------------------------------------------
-    # DELTA commit — compute diff against parent, store only the changes
-    # -----------------------------------------------------------------------
     parent_snapshot = commit_repo.get_snapshot(parent_commit_id)
     if not parent_snapshot:
         raise HTTPException(
@@ -79,9 +75,9 @@ async def create_snapshot(
             detail="No changes detected. Snapshot is already up to date.",
         )
 
-    # Check if it is time for a periodic re-snapshot to cap delta chain depth
     delta_depth = commit_repo.count_delta_depth(parent_commit_id)
     is_resnapshot = delta_depth >= _RESNAPSHOT_INTERVAL
+    ops_payload = operation_engine.build_payload_from_changes(diff_result.changes)
 
     commit = commit_repo.create_commit(
         project_id=project_id,
@@ -90,9 +86,9 @@ async def create_snapshot(
         author=user_id,
         storage_url=None,
         parent_commit=parent_commit_id,
-        # Supply both snapshot and diff to trigger a re-snapshot checkpoint
         snapshot=commit_data.snapshot if is_resnapshot else None,
-        diff=diff_result.changes if not is_resnapshot else None,
+        diff=None,
+        ops_payload=ops_payload if not is_resnapshot else None,
         element_count=len(commit_data.snapshot.elements),
         changed_elements=len(diff_result.changes),
     )
@@ -100,12 +96,75 @@ async def create_snapshot(
     return _build_summary(commit, user_id, user_repo, commit_data)
 
 
-def _build_summary(commit, user_id: str, user_repo, commit_data) -> CommitSummary:
+@router.post("/{project_id}/packages", response_model=CommitSummary, status_code=status.HTTP_201_CREATED)
+async def create_commit_package(
+    project_id: str,
+    package_data: CommitPackageCreate,
+    current_user: User = Depends(get_current_user),
+):
+    """Publish a compact change package without uploading a full snapshot."""
+    project = project_repo.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    user_id = current_user.userId
+
+    if not package_data.parentCommit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Change package publish requires parentCommit.",
+        )
+
+    parent_commit = commit_repo.get_commit(package_data.parentCommit)
+    if not parent_commit or parent_commit.projectId != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Parent commit {package_data.parentCommit} not found.",
+        )
+
+    if len(package_data.changes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No changes detected. Package is already up to date.",
+        )
+
+    delta_depth = commit_repo.count_delta_depth(package_data.parentCommit)
+    if delta_depth >= _RESNAPSHOT_INTERVAL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Checkpoint required. Publish a full snapshot for this commit.",
+        )
+
+    ops_payload = operation_engine.build_payload_from_changes(package_data.changes)
+    commit = commit_repo.create_commit(
+        project_id=project_id,
+        model_id=package_data.modelId,
+        message=package_data.commitMessage,
+        author=user_id,
+        storage_url=None,
+        parent_commit=package_data.parentCommit,
+        snapshot=None,
+        diff=None,
+        ops_payload=ops_payload,
+        element_count=package_data.elementCount,
+        changed_elements=len(package_data.changes),
+    )
+
+    return _build_summary(
+        commit,
+        user_id,
+        user_repo,
+        author_name=current_user.fullName,
+    )
+
+def _build_summary(commit, user_id: str, user_repo, commit_data=None, author_name: str = None) -> CommitSummary:
     author_info = user_repo.get_user_by_id(user_id)
     author_payload = {
         "userId": user_id,
         "fullName": author_info.fullName if author_info else (
-            commit_data.snapshot.userName or "Unknown"
+            author_name
+            or getattr(getattr(commit_data, "snapshot", None), "userName", None)
+            or "Unknown"
         ),
     }
     commit_dict = commit.model_dump(exclude={"snapshot"})
@@ -120,7 +179,7 @@ async def list_commits(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
 ):
-    """Get commit history for a project"""
+    """Get commit history for a project."""
     project = project_repo.get_project(project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -147,7 +206,7 @@ async def get_commit(
     commit_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Get specific commit details"""
+    """Get specific commit details."""
     commit = commit_repo.get_commit(commit_id)
     if not commit or commit.projectId != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commit not found")
@@ -159,13 +218,13 @@ async def get_commit(
     )
 
 
-@router.get("/{project_id}/commits/{commit_id}/snapshot", response_model=ElementSnapshot)
+@router.get("/{project_id}/commits/{commit_id}/snapshot")
 async def get_snapshot(
     project_id: str,
     commit_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Reconstruct and return the full snapshot for any commit"""
+    """Reconstruct and return the full snapshot for any commit."""
     commit = commit_repo.get_commit(commit_id)
     if not commit or commit.projectId != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commit not found")

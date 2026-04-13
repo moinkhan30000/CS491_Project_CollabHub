@@ -2,12 +2,21 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from schemas.element_schema import ElementSnapshot
+from schemas.diff_schema import Change
 
 class CommitCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: Optional[str] = None
     snapshot: ElementSnapshot
+
+
+class CommitPackageCreate(BaseModel):
+    modelId: str
+    commitMessage: str
+    parentCommit: str
+    changes: List[Change]
+    elementCount: int
 
 class AuthorInfo(BaseModel):
     userId: str

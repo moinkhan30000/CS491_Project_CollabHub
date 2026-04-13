@@ -12,14 +12,22 @@ namespace RevitVersionControl.UI
         public string SelectedCommitId { get; private set; }
         public string CurrentCommitId { get; private set; }
         public string ProjectId { get; private set; }
+        public string SelectedModelId { get; private set; }
 
         private ComboBox ProjectComboBox;
         private ComboBox CurrentCommitComboBox;
         private ComboBox TargetCommitComboBox;
+        private TextBlock CurrentVersionStatusText;
         private readonly ApiClient _apiClient = ApiClient.Instance;
+        private readonly string _documentPath;
+        private readonly bool _hasUnsavedChanges;
+        private DocumentSyncStatus _syncStatus;
 
-        public PullDialog()
+        public PullDialog(string documentPath, bool hasUnsavedChanges)
         {
+            _documentPath = documentPath;
+            _hasUnsavedChanges = hasUnsavedChanges;
+            _syncStatus = DocumentSyncStateService.GetStatus(documentPath, hasUnsavedChanges);
             InitializeComponent();
         }
 
@@ -40,6 +48,13 @@ namespace RevitVersionControl.UI
             mainPanel.Children.Add(new TextBlock { Text = "Current Commit:", Margin = new Thickness(0, 0, 0, 5) });
             CurrentCommitComboBox = new ComboBox { Margin = new Thickness(0, 0, 0, 15) };
             mainPanel.Children.Add(CurrentCommitComboBox);
+            CurrentVersionStatusText = new TextBlock
+            {
+                Margin = new Thickness(0, -10, 0, 15),
+                Text = _syncStatus.Summary,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            mainPanel.Children.Add(CurrentVersionStatusText);
 
             mainPanel.Children.Add(new TextBlock { Text = "Target Commit:", Margin = new Thickness(0, 0, 0, 5) });
             TargetCommitComboBox = new ComboBox { Margin = new Thickness(0, 0, 0, 15) };
@@ -86,7 +101,8 @@ namespace RevitVersionControl.UI
                 ProjectComboBox.DisplayMemberPath = "Name";
                 if (projects.Count > 0)
                 {
-                    ProjectComboBox.SelectedIndex = 0;
+                    int trackedIndex = projects.FindIndex(p => p.ProjectId == _syncStatus.State?.ProjectId);
+                    ProjectComboBox.SelectedIndex = trackedIndex >= 0 ? trackedIndex : 0;
                 }
                 else
                 {
@@ -117,8 +133,13 @@ namespace RevitVersionControl.UI
         {
             try
             {
+                _syncStatus = DocumentSyncStateService.GetStatusForProject(_documentPath, projectId, _hasUnsavedChanges);
                 CurrentCommitComboBox.ItemsSource = null;
                 TargetCommitComboBox.ItemsSource = null;
+                CurrentCommitComboBox.SelectedItem = null;
+                TargetCommitComboBox.SelectedItem = null;
+                CurrentCommitComboBox.IsEnabled = true;
+                CurrentVersionStatusText.Foreground = System.Windows.SystemColors.ControlTextBrush;
 
                 var commits = await _apiClient.GetCommitsAsync(projectId);
                 var commitItems = new List<CommitItem>();
@@ -127,6 +148,7 @@ namespace RevitVersionControl.UI
                     commitItems.Add(new CommitItem
                     {
                         CommitId = commit.CommitId,
+                        ModelId = commit.ModelId,
                         DisplayText = $"{commit.Message} ({commit.CommitId})"
                     });
                 }
@@ -135,12 +157,98 @@ namespace RevitVersionControl.UI
                 TargetCommitComboBox.ItemsSource = commitItems;
                 CurrentCommitComboBox.DisplayMemberPath = "DisplayText";
                 TargetCommitComboBox.DisplayMemberPath = "DisplayText";
+
+                CommitItem trackedCurrent = null;
+                if (_syncStatus.State?.ProjectId == projectId
+                    && !string.IsNullOrWhiteSpace(_syncStatus.State.CurrentCommitId))
+                {
+                    trackedCurrent = commitItems.Find(c => c.CommitId == _syncStatus.State.CurrentCommitId);
+                    if (trackedCurrent != null)
+                    {
+                        CurrentCommitComboBox.SelectedItem = trackedCurrent;
+                        CurrentCommitComboBox.IsEnabled = false;
+                    }
+                }
+
+                if (CurrentCommitComboBox.SelectedItem == null)
+                {
+                    CurrentVersionStatusText.Text =
+                        _syncStatus.HasTrackedCommit && _syncStatus.State?.ProjectId == projectId
+                            ? "Current synced version: tracked commit was not found on the server. Select the current commit manually."
+                            : "Current synced version: unknown for this document. Select the current commit manually.";
+                }
+                else
+                {
+                    CurrentVersionStatusText.Text = BuildSyncStateText(commitItems, trackedCurrent);
+                }
+
+                CurrentVersionStatusText.Foreground = BuildSyncStateBrush(commitItems, trackedCurrent);
+                SelectDefaultTargetCommit(commitItems, trackedCurrent);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to load commits: {ex.Message}", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private string BuildSyncStateText(List<CommitItem> commitItems, CommitItem trackedCurrent)
+        {
+            if (trackedCurrent == null)
+                return "Current synced version: unknown for this document. Select the current commit manually.";
+
+            string commitText = trackedCurrent.CommitId.Length > 8
+                ? trackedCurrent.CommitId.Substring(0, 8)
+                : trackedCurrent.CommitId;
+
+            bool remoteAhead = commitItems.Count > 0 && commitItems[0].CommitId != trackedCurrent.CommitId;
+            bool localChanges = _syncStatus.HasLocalChanges;
+
+            if (localChanges && remoteAhead)
+                return $"Current synced version: {commitText} (local changes detected; remote has newer commits)";
+
+            if (localChanges)
+                return _syncStatus.Summary;
+
+            if (remoteAhead)
+                return $"Current synced version: {commitText} (clean locally; remote has newer commits)";
+
+            return $"Current synced version: {commitText} (clean and up to date)";
+        }
+
+        private System.Windows.Media.Brush BuildSyncStateBrush(List<CommitItem> commitItems, CommitItem trackedCurrent)
+        {
+            if (trackedCurrent == null)
+                return System.Windows.SystemColors.ControlTextBrush;
+
+            bool remoteAhead = commitItems.Count > 0 && commitItems[0].CommitId != trackedCurrent.CommitId;
+            bool localChanges = _syncStatus.HasLocalChanges;
+
+            if (localChanges && remoteAhead)
+                return System.Windows.Media.Brushes.DarkRed;
+
+            if (localChanges)
+                return System.Windows.Media.Brushes.DarkOrange;
+
+            if (remoteAhead)
+                return System.Windows.Media.Brushes.DarkBlue;
+
+            return System.Windows.Media.Brushes.DarkGreen;
+        }
+
+        private void SelectDefaultTargetCommit(List<CommitItem> commitItems, CommitItem trackedCurrent)
+        {
+            if (commitItems == null || commitItems.Count == 0)
+                return;
+
+            if (trackedCurrent == null)
+            {
+                TargetCommitComboBox.SelectedIndex = 0;
+                return;
+            }
+
+            var suggestedTarget = commitItems.Find(c => c.CommitId != trackedCurrent.CommitId);
+            TargetCommitComboBox.SelectedItem = suggestedTarget ?? trackedCurrent;
         }
 
         private void PullButton_Click(object sender, RoutedEventArgs e)
@@ -177,6 +285,14 @@ namespace RevitVersionControl.UI
             if (TargetCommitComboBox.SelectedItem is CommitItem targetItem)
             {
                 SelectedCommitId = targetItem.CommitId;
+                SelectedModelId = targetItem.ModelId;
+            }
+
+            if (CurrentCommitId == SelectedCommitId)
+            {
+                MessageBox.Show("This document is already at the selected target commit.", "Up to Date",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
             }
 
             DialogResult = true;
@@ -192,6 +308,7 @@ namespace RevitVersionControl.UI
         private class CommitItem
         {
             public string CommitId { get; set; }
+            public string ModelId { get; set; }
             public string DisplayText { get; set; }
         }
     }

@@ -13,11 +13,13 @@ namespace RevitVersionControl.UI
         public string ModelPath { get; }
 
         private readonly ApiClient _apiClient = ApiClient.Instance;
+        private DocumentSyncStatus _syncStatus;
 
         public PublishDialog(string modelPath)
         {
             InitializeComponent();
             ModelPath = modelPath;
+            _syncStatus = DocumentSyncStateService.GetStatus(modelPath, hasUnsavedChanges: false);
             Loaded += PublishDialog_Loaded;
             ProjectComboBox.SelectionChanged += ProjectComboBox_SelectionChanged;
         }
@@ -37,8 +39,9 @@ namespace RevitVersionControl.UI
                 ProjectComboBox.DisplayMemberPath = "Name";
                 if (projects.Count > 0)
                 {
-                    ProjectComboBox.SelectedIndex = 0;
-                    await UpdateBaseFileStatusAsync(projects[0].ProjectId);
+                    int trackedIndex = projects.FindIndex(p => p.ProjectId == _syncStatus.State?.ProjectId);
+                    ProjectComboBox.SelectedIndex = trackedIndex >= 0 ? trackedIndex : 0;
+                    await UpdateBaseFileStatusAsync(((Project)ProjectComboBox.SelectedItem)?.ProjectId ?? projects[0].ProjectId);
                 }
                 else
                 {
@@ -70,13 +73,20 @@ namespace RevitVersionControl.UI
             BaseFileStatusText.Text = "Base file: checking...";
             try
             {
+                _syncStatus = DocumentSyncStateService.GetStatusForProject(ModelPath, projectId, hasUnsavedChanges: false);
+                TrackedVersionStatusText.Text = _syncStatus.Summary;
+
                 if (string.IsNullOrWhiteSpace(ModelPath))
                 {
                     BaseFileStatusText.Text = "Base file: document not saved";
                     return;
                 }
 
-                var status = await _apiClient.GetBaseFileStatusAsync(projectId, ModelPath);
+                string trackedModelId = _syncStatus.State?.ProjectId == projectId
+                    ? (_syncStatus.State?.ModelId ?? ModelPath)
+                    : ModelPath;
+
+                var status = await _apiClient.GetBaseFileStatusAsync(projectId, trackedModelId);
                 if (status == null)
                 {
                     BaseFileStatusText.Text = "Base file: status unavailable";

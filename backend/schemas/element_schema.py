@@ -12,6 +12,7 @@ class Parameter(BaseModel):
     type: str
     isReadOnly: bool = False
     storageType: str
+    elementName: Optional[str] = None
 
 class BoundingBox(BaseModel):
     min: Point3D

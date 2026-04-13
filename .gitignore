@@ -20,4 +20,10 @@ node_modules/
 backend/data/
 backend/storage/
 
+# Local AI project memory
+SESSION.md
+TASKS.md
+ARCHITECTURE.md
+HANDOFF.md
+
 

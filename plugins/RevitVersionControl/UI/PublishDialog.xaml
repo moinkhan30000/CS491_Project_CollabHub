@@ -18,6 +18,8 @@
             <ComboBox Name="ProjectComboBox" Height="30" DisplayMemberPath="Name"/>
             <TextBlock Name="BaseFileStatusText" Margin="0,8,0,0" Foreground="#666666"
                        Text="Base file: unknown"/>
+            <TextBlock Name="TrackedVersionStatusText" Margin="0,4,0,0" Foreground="#666666"
+                       Text="Current synced version: unknown"/>
         </StackPanel>
 
         <!-- Commit Message -->

@@ -1,13 +1,17 @@
-from datetime import datetime
+ï»¿from datetime import datetime
 import uuid
 from typing import List, Optional, Any
-from sqlmodel import Session, select
+
 from fastapi.encoders import jsonable_encoder
+from sqlmodel import Session, select
+
 from database import engine
 from entities.commit_entity import Commit
 from entities.project_entity import Project
-from schemas.element_schema import ElementSnapshot
 from schemas.diff_schema import Change
+from schemas.element_schema import ElementSnapshot
+from schemas.operation_schema import OpsCommitPayload
+from services.operation_engine import OperationEngine
 
 _RESNAPSHOT_INTERVAL = 20
 
@@ -17,6 +21,8 @@ _MAX_CHAIN_WALK = 200
 
 
 class CommitRepository:
+    def __init__(self):
+        self._operation_engine = OperationEngine()
 
     # ------------------------------------------------------------------
     # Write
@@ -33,32 +39,36 @@ class CommitRepository:
         parent_commit: Optional[str] = None,
         snapshot: Optional[ElementSnapshot] = None,
         diff: Optional[List[Change]] = None,
+        ops_payload: Optional[OpsCommitPayload] = None,
         element_count: Optional[int] = None,
         changed_elements: Optional[int] = None,
     ) -> Commit:
         """
         Create a commit storing either a full snapshot (root / checkpoint)
-        or a delta (all other commits).
+        or a semantic delta (all other commits).
 
-          parent_commit is None         :root, snapshot required
-          parent_commit set, diff only  :normal delta commit
-          parent_commit set, both given :forced re-snapshot checkpoint
+          parent_commit is None                : root, snapshot required
+          parent_commit set, delta only        : normal delta commit
+          parent_commit set, snapshot + delta  : forced re-snapshot checkpoint
         """
         with Session(engine) as session:
             commit_id = str(uuid.uuid4())
 
             is_full = parent_commit is None
-            if snapshot is not None and diff is not None:
-                is_full = True  # explicit re-snapshot checkpoint
+            if snapshot is not None and (diff is not None or ops_payload is not None):
+                is_full = True
 
             if is_full:
                 if snapshot is None:
                     raise ValueError("Root commit requires a full snapshot.")
                 payload = jsonable_encoder(snapshot)
             else:
-                if diff is None:
-                    raise ValueError("Delta commit requires a diff.")
-                payload = jsonable_encoder(diff)
+                if ops_payload is not None:
+                    payload = jsonable_encoder(ops_payload)
+                elif diff is not None:
+                    payload = jsonable_encoder(diff)
+                else:
+                    raise ValueError("Delta commit requires a diff or operation payload.")
 
             commit = Commit(
                 commitId=commit_id,
@@ -143,7 +153,7 @@ class CommitRepository:
             return len(session.exec(statement).all())
 
     # ------------------------------------------------------------------
-    # Fast path — linear chain delta collection
+    # Fast path - linear chain delta collection
     # ------------------------------------------------------------------
 
     def get_linear_chain_deltas(
@@ -164,7 +174,6 @@ class CommitRepository:
 
         The caller should fall back to full reconstruction on None.
         """
-        # Walk backwards, collecting commits in reverse order
         chain: List[Commit] = []
         current_id: Optional[str] = target_commit_id
         steps = 0
@@ -174,15 +183,11 @@ class CommitRepository:
                 commit = session.get(Commit, current_id)
 
             if commit is None:
-                # Broken chain
                 return None
 
-            # Reached the user's current commit — chain is complete
             if current_id == current_commit_id:
                 break
 
-            # Hit a full snapshot before reaching current_commit_id.
-            # Cannot use the fast path — the delta chain crossed a boundary.
             if commit.isFullSnapshot and current_id != target_commit_id:
                 return None
 
@@ -190,22 +195,19 @@ class CommitRepository:
             current_id = commit.parentCommit
             steps += 1
         else:
-            # Loop exhausted _MAX_CHAIN_WALK without finding current_commit_id
             return None
 
         if not chain:
-            # target IS current — no changes
             return []
 
-        # chain is in reverse order (target : current+1), flip it
         chain.reverse()
 
-        # Extract and flatten all stored deltas in forward order
         all_changes: List[Change] = []
         for commit in chain:
-            if commit.snapshot is None:
-                return None  # Missing delta — cannot use fast path
-            all_changes.extend([Change(**c) for c in commit.snapshot])
+            commit_changes = self._get_commit_changes(commit)
+            if commit_changes is None:
+                return None
+            all_changes.extend(commit_changes)
 
         return all_changes
 
@@ -220,7 +222,7 @@ class CommitRepository:
         if commit is None or commit.snapshot is None or commit.isFullSnapshot:
             return None
 
-        return [Change(**c) for c in commit.snapshot]
+        return self._get_commit_changes(commit)
 
     def is_direct_child(
         self, parent_commit_id: str, child_commit_id: str
@@ -230,14 +232,14 @@ class CommitRepository:
         return child is not None and child.parentCommit == parent_commit_id
 
     # ------------------------------------------------------------------
-    # Slow path — full recursive reconstruction
+    # Slow path - full recursive reconstruction
     # ------------------------------------------------------------------
 
     def get_snapshot(self, commit_id: str) -> Optional[ElementSnapshot]:
         """
         Reconstruct the full ElementSnapshot for any commit.
-        Full snapshot  : deserialise and return directly.
-        Delta commit   : recurse to parent and replay stored changes.
+        Full snapshot  : deserialize and return directly.
+        Delta commit   : recurse to parent and replay stored changes/ops.
         Depth is bounded by _RESNAPSHOT_INTERVAL.
         """
         from diff_engine import DiffEngine
@@ -248,7 +250,6 @@ class CommitRepository:
         if commit is None or commit.snapshot is None:
             return None
 
-        # Base case
         if commit.isFullSnapshot:
             return ElementSnapshot(**commit.snapshot)
 
@@ -259,12 +260,19 @@ class CommitRepository:
         if parent_snapshot is None:
             return None
 
-        changes = [Change(**c) for c in commit.snapshot]
-        engine_instance = DiffEngine()
-        updated_elements = engine_instance.apply_changes(
-            base_elements=parent_snapshot.elements,
-            changes=changes,
-        )
+        ops_payload = self._get_ops_payload(commit)
+        if ops_payload is not None:
+            updated_elements = self._operation_engine.apply_operations(
+                base_elements=parent_snapshot.elements,
+                operations=ops_payload.operations,
+            )
+        else:
+            changes = [Change(**c) for c in commit.snapshot]
+            engine_instance = DiffEngine()
+            updated_elements = engine_instance.apply_changes(
+                base_elements=parent_snapshot.elements,
+                changes=changes,
+            )
 
         return ElementSnapshot(
             version=parent_snapshot.version,
@@ -287,3 +295,25 @@ class CommitRepository:
             depth += 1
             current_id = commit.parentCommit
         return depth
+
+    def _get_ops_payload(self, commit: Commit) -> Optional[OpsCommitPayload]:
+        if commit is None or commit.snapshot is None or commit.isFullSnapshot:
+            return None
+
+        if isinstance(commit.snapshot, dict) and commit.snapshot.get("commitFormat") == "ops":
+            return OpsCommitPayload(**commit.snapshot)
+
+        return None
+
+    def _get_commit_changes(self, commit: Commit) -> Optional[List[Change]]:
+        if commit is None or commit.snapshot is None or commit.isFullSnapshot:
+            return None
+
+        ops_payload = self._get_ops_payload(commit)
+        if ops_payload is not None:
+            return self._operation_engine.to_changes(ops_payload)
+
+        if isinstance(commit.snapshot, list):
+            return [Change(**c) for c in commit.snapshot]
+
+        return None

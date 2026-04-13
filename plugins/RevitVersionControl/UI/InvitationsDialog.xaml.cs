@@ -14,6 +14,9 @@ namespace RevitVersionControl.UI
         /// Path to the downloaded file (if user accepted an invitation)
         /// </summary>
         public string DownloadedFilePath { get; private set; }
+        public string AcceptedProjectId { get; private set; }
+        public string AcceptedBaseCommitId { get; private set; }
+        public string AcceptedModelId { get; private set; }
 
         public InvitationsDialog()
         {
@@ -47,6 +50,7 @@ namespace RevitVersionControl.UI
                 dynamic invite = btn.DataContext;
                 string projectName = invite?.ProjectName ?? "Project";
                 string fileExt = invite?.FileExtension ?? ".rvt";
+                AcceptedProjectId = invite?.ProjectId;
                 
                 // Remove leading dot if present for filter, add it back for default extension
                 string extNoDot = fileExt.TrimStart('.');
@@ -92,6 +96,7 @@ namespace RevitVersionControl.UI
                      if (result == savePath)
                      {
                          DownloadedFilePath = savePath;
+                         await TrackAcceptedProjectAsync(savePath);
                          
                          // Ask user if they want to open the project now
                          var openNow = MessageBox.Show(
@@ -124,6 +129,48 @@ namespace RevitVersionControl.UI
             catch (Exception ex)
             {
                 MessageBox.Show($"Error: {ex.Message}");
+            }
+        }
+
+        private async Task TrackAcceptedProjectAsync(string savePath)
+        {
+            if (string.IsNullOrWhiteSpace(AcceptedProjectId) || string.IsNullOrWhiteSpace(savePath))
+                return;
+
+            try
+            {
+                var baseCommit = await ApiClient.Instance.GetBaseModelCommitAsync(AcceptedProjectId);
+                if (baseCommit != null)
+                {
+                    AcceptedBaseCommitId = baseCommit.CommitId;
+                    AcceptedModelId = baseCommit.ModelId;
+                    DocumentSyncStateService.SaveState(
+                        savePath,
+                        AcceptedProjectId,
+                        baseCommit.ModelId,
+                        baseCommit.CommitId);
+
+                    var baseSnapshot = await ApiClient.Instance.GetSnapshotAsync(
+                        AcceptedProjectId,
+                        baseCommit.CommitId);
+                    if (baseSnapshot != null)
+                    {
+                        baseSnapshot.ProjectId = AcceptedProjectId;
+                        baseSnapshot.ModelId = string.IsNullOrWhiteSpace(baseCommit.ModelId)
+                            ? savePath
+                            : baseCommit.ModelId;
+
+                        SnapshotCacheService.SaveSnapshot(
+                            AcceptedProjectId,
+                            baseSnapshot.ModelId,
+                            baseCommit.CommitId,
+                            baseSnapshot);
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore local tracking failures during invite acceptance.
             }
         }
     }

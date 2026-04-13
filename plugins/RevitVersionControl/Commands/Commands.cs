@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Autodesk.Revit.Attributes;
@@ -104,6 +104,12 @@ namespace RevitVersionControl.Commands
 
                 string commitMessage = publishDialog.CommitMessage;
                 string projectId = publishDialog.SelectedProjectId;
+                var trackedState = DocumentSyncStateService.GetStateForProject(doc.PathName, projectId);
+                bool canUseTrackedState = trackedState != null
+                                          && string.Equals(trackedState.ProjectId, projectId, StringComparison.OrdinalIgnoreCase);
+                string modelId = canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.ModelId)
+                    ? trackedState.ModelId
+                    : doc.PathName;
 
                 if (string.IsNullOrWhiteSpace(doc.PathName) || !System.IO.File.Exists(doc.PathName))
                 {
@@ -113,7 +119,7 @@ namespace RevitVersionControl.Commands
 
                 var apiClient = ApiClient.Instance;
                 var baseStatusTask = Task.Run(async () =>
-                    await apiClient.GetBaseFileStatusAsync(projectId, doc.PathName));
+                    await apiClient.GetBaseFileStatusAsync(projectId, modelId));
                 var baseStatus = baseStatusTask.Result;
 
                 if (baseStatus == null)
@@ -128,7 +134,7 @@ namespace RevitVersionControl.Commands
                 if (!baseStatus.Exists)
                 {
                     var uploadTask = Task.Run(async () =>
-                        await apiClient.UploadBaseFileAsync(projectId, doc.PathName, doc.PathName));
+                        await apiClient.UploadBaseFileAsync(projectId, modelId, doc.PathName));
                     bool uploaded = uploadTask.Result;
                     if (!uploaded)
                     {
@@ -152,26 +158,86 @@ namespace RevitVersionControl.Commands
                 var elementData = extractor.ExtractAllElements(extractionOptions);
 
                 // Create snapshot
+                var extractedElements = elementData.Cast<object>().ToList();
                 var snapshot = new ElementSnapshot
                 {
                     Version = "1.0",
                     ProjectId = projectId,
-                    ModelId = doc.PathName,
+                    ModelId = modelId,
                     Timestamp = DateTime.UtcNow,
                     UserName = uiApp.Application.Username,
                     CommitMessage = commitMessage,
-                    Elements = elementData.Cast<object>().ToList()
+                    Elements = extractedElements,
+                    ParentCommit = canUseTrackedState ? trackedState.CurrentCommitId : null
                 };
 
-                // Publish to server
-                var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot));
-                // Note: Blocking call is not ideal but standard for simple Revit commands.
-                var commit = publishTask.GetAwaiter().GetResult();
+                Commit commit = null;
+                bool usedPackagePublish = false;
+                string packageFallbackReason = null;
+
+                if (canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.CurrentCommitId))
+                {
+                    var baselineSnapshot = SnapshotCacheService.GetSnapshot(projectId, modelId, trackedState.CurrentCommitId);
+                    if (baselineSnapshot != null)
+                    {
+                        var localDiffEngine = new LocalDiffEngine();
+                        var changes = localDiffEngine.ComputeDiff(baselineSnapshot.Elements, snapshot.Elements);
+
+                        if (changes.Count == 0)
+                        {
+                            TaskDialog.Show("Up to Date", "No changes detected. Snapshot is already up to date.");
+                            return Result.Succeeded;
+                        }
+
+                        var package = new CommitPackage
+                        {
+                            ModelId = modelId,
+                            CommitMessage = commitMessage,
+                            ParentCommit = trackedState.CurrentCommitId,
+                            Changes = changes,
+                            ElementCount = extractedElements.Count
+                        };
+
+                        var packageTask = Task.Run(async () => await ApiClient.Instance.PublishPackageAsync(projectId, package));
+                        commit = packageTask.GetAwaiter().GetResult();
+                        if (commit != null)
+                        {
+                            usedPackagePublish = true;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(apiClient.LastError) &&
+                                 apiClient.LastError.Contains("No changes detected", StringComparison.OrdinalIgnoreCase))
+                        {
+                            TaskDialog.Show("Up to Date", "No changes detected. Snapshot is already up to date.");
+                            return Result.Succeeded;
+                        }
+                        else
+                        {
+                            packageFallbackReason = apiClient.LastError;
+                        }
+                    }
+                }
+
+                if (commit == null)
+                {
+                    var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot));
+                    commit = publishTask.GetAwaiter().GetResult();
+                }
 
                 if (commit != null)
                 {
+                    DocumentSyncStateService.SaveState(doc.PathName, projectId, modelId, commit.CommitId);
+                    SnapshotCacheService.SaveSnapshot(projectId, modelId, commit.CommitId, snapshot);
+
+                    string modeText = usedPackagePublish
+                        ? "Delta package published successfully!"
+                        : "Snapshot published successfully!";
+                    if (!string.IsNullOrWhiteSpace(packageFallbackReason))
+                    {
+                        modeText += "\n\nPackage publish was unavailable, so the add-in fell back to a full snapshot.";
+                    }
+
                     TaskDialog.Show("Success", 
-                        $"Snapshot published successfully!\n\n" +
+                        $"{modeText}\n\n" +
                         $"Commit ID: {commit.CommitId}\n" +
                         $"Elements: {elementData.Count}");
                     return Result.Succeeded;
@@ -186,8 +252,8 @@ namespace RevitVersionControl.Commands
                     }
 
                     var errorDetail = string.IsNullOrWhiteSpace(apiClient.LastError)
-                        ? "Failed to publish snapshot to server."
-                        : $"Failed to publish snapshot to server.\n\n{apiClient.LastError}";
+                        ? "Failed to publish changes to server."
+                        : $"Failed to publish changes to server.\n\n{apiClient.LastError}";
                     TaskDialog.Show("Error", errorDetail);
                     return Result.Failed;
                 }
@@ -246,7 +312,7 @@ namespace RevitVersionControl.Commands
                 UIApplication uiApp = commandData.Application;
                 Document doc = uiApp.ActiveUIDocument.Document;
 
-                var pullDialog = new PullDialog();
+                var pullDialog = new PullDialog(doc.PathName, doc.IsModified);
                 var result = pullDialog.ShowDialog();
 
                 if (result != true)
@@ -255,6 +321,9 @@ namespace RevitVersionControl.Commands
                 string targetCommit = pullDialog.SelectedCommitId;
                 string currentCommit = pullDialog.CurrentCommitId;
                 string projectId = pullDialog.ProjectId;
+                string trackedModelId = pullDialog.SelectedModelId
+                                        ?? DocumentSyncStateService.GetStateForProject(doc.PathName, projectId)?.ModelId
+                                        ?? doc.PathName;
 
                 // Use wait cursor instead of blocking TaskDialog
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
@@ -305,9 +374,9 @@ namespace RevitVersionControl.Commands
                 {
                     MainInstruction = "Apply Remote Changes",
                     MainContent = $"Found {totalChanges} changes:\n" +
-                                 $"  • Added: {addedCount}\n" +
-                                 $"  • Modified: {modifiedCount}\n" +
-                                 $"  • Deleted: {deletedCount}\n\n" +
+                                 $"  â€¢ Added: {addedCount}\n" +
+                                 $"  â€¢ Modified: {modifiedCount}\n" +
+                                 $"  â€¢ Deleted: {deletedCount}\n\n" +
                                  $"Do you want to apply these changes to your model?",
                     CommonButtons = buttons
                 };
@@ -336,25 +405,90 @@ namespace RevitVersionControl.Commands
 
                 if (applyResponse.Success)
                 {
-                    string resultMessage = $"Changes Applied Successfully!\n\n" +
-                                          $"Applied: {applyResponse.AppliedCount}\n" +
-                                          $"Skipped: {applyResponse.SkippedCount}";
-
-                    if (applyResponse.Errors.Count > 0)
+                    DocumentSyncStateService.SaveState(doc.PathName, projectId, trackedModelId, targetCommit);
+                    try
                     {
-                        resultMessage += $"\n\nWarnings/Errors: {applyResponse.Errors.Count}\n";
-                        resultMessage += string.Join("\n", applyResponse.Errors.Take(5));
-                        if (applyResponse.Errors.Count > 5)
-                            resultMessage += $"\n... and {applyResponse.Errors.Count - 5} more";
+                        var extractor = new ElementExtractor(doc);
+                        var extractionOptions = new ExtractionOptions
+                        {
+                            BatchSize = 200,
+                            PauseMilliseconds = 10,
+                            IncludeGeometry = true,
+                            LogProgress = true
+                        };
+                        var currentElements = extractor.ExtractAllElements(extractionOptions);
+                        var cachedSnapshot = new ElementSnapshot
+                        {
+                            Version = "1.0",
+                            ProjectId = projectId,
+                            ModelId = trackedModelId,
+                            Timestamp = DateTime.UtcNow,
+                            UserName = uiApp.Application.Username,
+                            CommitMessage = $"Cached after pull to {targetCommit}",
+                            Elements = currentElements.Cast<object>().ToList(),
+                            ParentCommit = targetCommit
+                        };
+                        SnapshotCacheService.SaveSnapshot(projectId, trackedModelId, targetCommit, cachedSnapshot);
+                    }
+                    catch
+                    {
+                        // Ignore local cache refresh failures after a successful pull.
                     }
 
-                    TaskDialog.Show("Success", resultMessage);
+                    bool hasIssues = applyResponse.Errors.Count > 0
+                                     || applyResponse.Warnings.Count > 0
+                                     || applyResponse.UnsupportedElements.Count > 0
+                                     || applyResponse.IgnoredAutogenerated.Count > 0;
+
+                    string title = hasIssues ? "Completed with issues" : "Success";
+                    string resultMessage = $"Remote changes processed.\n\n" +
+                                          $"Applied: {applyResponse.AppliedCount}\n" +
+                                          $"Skipped: {applyResponse.SkippedCount}\n" +
+                                          $"Ignored autogenerated: {applyResponse.IgnoredAutogenerated.Count}\n" +
+                                          $"Unsupported/manual: {applyResponse.UnsupportedElements.Count}\n" +
+                                          $"Warnings: {applyResponse.WarningCount}\n" +
+                                          $"Failures: {applyResponse.ErrorCount}";
+
+                    if (applyResponse.UnsupportedElements.Count > 0)
+                    {
+                        resultMessage += $"\n\nUnsupported/manual review:\n";
+                        resultMessage += string.Join("\n", applyResponse.UnsupportedElements.Take(3));
+                        if (applyResponse.UnsupportedElements.Count > 3)
+                            resultMessage += $"\n... and {applyResponse.UnsupportedElements.Count - 3} more";
+                    }
+
+                    if (applyResponse.Warnings.Count > 0)
+                    {
+                        resultMessage += $"\n\nWarnings:\n";
+                        resultMessage += string.Join("\n", applyResponse.Warnings.Take(3));
+                        if (applyResponse.Warnings.Count > 3)
+                            resultMessage += $"\n... and {applyResponse.Warnings.Count - 3} more";
+                    }
 
                     if (applyResponse.Errors.Count > 0)
                     {
+                        resultMessage += $"\n\nFailures:\n";
+                        resultMessage += string.Join("\n", applyResponse.Errors.Take(3));
+                        if (applyResponse.Errors.Count > 3)
+                            resultMessage += $"\n... and {applyResponse.Errors.Count - 3} more";
+                    }
+
+                    TaskDialog.Show(title, resultMessage);
+
+                    if (applyResponse.Errors.Count > 0
+                        || applyResponse.Warnings.Count > 0
+                        || applyResponse.UnsupportedElements.Count > 0
+                        || applyResponse.IgnoredAutogenerated.Count > 0)
+                    {
                         System.Diagnostics.Debug.WriteLine("\n=== APPLY CHANGES DETAILED LOG ===");
+                        foreach (var ignored in applyResponse.IgnoredAutogenerated)
+                            System.Diagnostics.Debug.WriteLine("[IGNORED] " + ignored);
+                        foreach (var unsupported in applyResponse.UnsupportedElements)
+                            System.Diagnostics.Debug.WriteLine("[UNSUPPORTED] " + unsupported);
+                        foreach (var warning in applyResponse.Warnings)
+                            System.Diagnostics.Debug.WriteLine("[WARNING] " + warning);
                         foreach (var error in applyResponse.Errors)
-                            System.Diagnostics.Debug.WriteLine(error);
+                            System.Diagnostics.Debug.WriteLine("[ERROR] " + error);
                         System.Diagnostics.Debug.WriteLine("=================================\n");
                     }
 
@@ -498,3 +632,4 @@ namespace RevitVersionControl.Commands
         }
     }
 }
+

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, De
 from fastapi.responses import FileResponse
 from typing import List, Optional
 from datetime import datetime
+import json
 from schemas.project_schema import ProjectCreate
 from schemas.element_schema import ElementSnapshot
 from entities.project_entity import Project
@@ -33,6 +34,7 @@ async def init_project(
     name: str = Form(...),
     description: Optional[str] = Form(None),
     modelId: str = Form(...),
+    snapshotJson: Optional[str] = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
@@ -42,31 +44,53 @@ async def init_project(
 
     await save_base_file(project.projectId, modelId, file)
 
-    empty_snapshot = ElementSnapshot(
-        version="1.0",
-        projectId=project.projectId,
-        modelId=modelId,
-        timestamp=datetime.utcnow(),
-        userName=current_user.fullName,
-        commitMessage="Initial Commit",
-        elements=[]
-    )
+    initial_snapshot = None
+    if snapshotJson:
+        try:
+            snapshot_payload = json.loads(snapshotJson)
+            snapshot_payload["projectId"] = project.projectId
+            snapshot_payload["modelId"] = modelId
+            snapshot_payload.setdefault("timestamp", datetime.utcnow().isoformat())
+            snapshot_payload.setdefault("userName", current_user.fullName)
+            snapshot_payload.setdefault("commitMessage", "Initial Base Snapshot")
+            initial_snapshot = ElementSnapshot(**snapshot_payload)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid snapshotJson payload: {exc}",
+            )
+    else:
+        initial_snapshot = ElementSnapshot(
+            version="1.0",
+            projectId=project.projectId,
+            modelId=modelId,
+            timestamp=datetime.utcnow(),
+            userName=current_user.fullName,
+            commitMessage="Initial Commit",
+            elements=[]
+        )
 
-    commit_repo.create_commit(
+    initial_commit = commit_repo.create_commit(
         project_id=project.projectId,
         model_id=modelId,
-        message="Initial Commit",
+        message=initial_snapshot.commitMessage or "Initial Commit",
         author=user_id,
         storage_url=None,
         change_type="ADD",
-        snapshot=empty_snapshot,
-        element_count=0,
-        changed_elements=0
+        snapshot=initial_snapshot,
+        element_count=len(initial_snapshot.elements),
+        changed_elements=len(initial_snapshot.elements)
     )
 
     member_repo.add_member(project.projectId, user_id, role="OWNER", status="ACTIVE")
 
-    return {"projectId": project.projectId, "name": project.name, "status": "Initialized"}
+    return {
+        "projectId": project.projectId,
+        "name": project.name,
+        "status": "Initialized",
+        "modelId": modelId,
+        "baseCommitId": initial_commit.commitId,
+    }
 
 @router.post("/{project_id}/invite")
 async def invite_user(project_id: str, email: str):

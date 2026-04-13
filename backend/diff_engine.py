@@ -6,8 +6,6 @@ from typing import Dict, List, Set
 from schemas.element_schema import Element
 from schemas.diff_schema import Change, ParameterChange, Conflict, DiffResult
 from datetime import datetime
-import hashlib
-import json
 
 class DiffEngine:
     """Compute differences between two element snapshots"""
@@ -147,7 +145,8 @@ class DiffEngine:
                     name=param_name,
                     oldValue=None,
                     newValue=target_param.value,
-                    type=target_param.type
+                    type=target_param.type,
+                    elementName=target_param.elementName
                 ))
             
             # Parameter deleted
@@ -156,7 +155,8 @@ class DiffEngine:
                     name=param_name,
                     oldValue=base_param.value,
                     newValue=None,
-                    type=base_param.type
+                    type=base_param.type,
+                    elementName=base_param.elementName
                 ))
             
             # Parameter modified
@@ -166,7 +166,8 @@ class DiffEngine:
                         name=param_name,
                         oldValue=base_param.value,
                         newValue=target_param.value,
-                        type=target_param.type
+                        type=target_param.type,
+                        elementName=target_param.elementName or base_param.elementName
                     ))
         
         return changes

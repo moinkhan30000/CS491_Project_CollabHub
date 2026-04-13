@@ -102,12 +102,17 @@ namespace RevitVersionControl.Services
             return await PostAsync<Project>("/projects", payload);
         }
 
-        public async Task<Project> InitProjectAsync(string name, string filePath)
+        public async Task<Project> InitProjectAsync(string name, string filePath, ElementSnapshot initialSnapshot = null)
         {
             using (var content = new MultipartFormDataContent())
             {
                 content.Add(new StringContent(name), "name");
                 content.Add(new StringContent(filePath), "modelId");
+                if (initialSnapshot != null)
+                {
+                    string snapshotJson = JsonConvert.SerializeObject(initialSnapshot);
+                    content.Add(new StringContent(snapshotJson, Encoding.UTF8, "application/json"), "snapshotJson");
+                }
 
                 using (var fileStream = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))
                 {
@@ -201,10 +206,48 @@ namespace RevitVersionControl.Services
             return await PostAsync<Commit>($"/projects/{projectId}/snapshots", payload);
         }
 
+        public async Task<Commit> PublishPackageAsync(string projectId, CommitPackage package)
+        {
+            return await PostAsync<Commit>($"/projects/{projectId}/packages", package);
+        }
+
         public async Task<List<Commit>> GetCommitsAsync(string projectId, int limit = 50, int offset = 0)
         {
             var response = await GetAsync<CommitsResponse>($"/projects/{projectId}/commits?limit={limit}&offset={offset}");
             return response?.Commits ?? new List<Commit>();
+        }
+
+        public async Task<Commit> GetLatestCommitAsync(string projectId)
+        {
+            var commits = await GetCommitsAsync(projectId, limit: 1, offset: 0);
+            if (commits == null || commits.Count == 0)
+                return null;
+
+            return commits[0];
+        }
+
+        public async Task<Commit> GetProjectRootCommitAsync(string projectId)
+        {
+            var commits = await GetCommitsAsync(projectId, limit: 1000, offset: 0);
+            if (commits == null || commits.Count == 0)
+                return null;
+
+            var rootCommit = commits.Find(c => string.IsNullOrWhiteSpace(c.ParentCommit));
+            return rootCommit ?? commits[commits.Count - 1];
+        }
+
+        public async Task<Commit> GetBaseModelCommitAsync(string projectId)
+        {
+            var commits = await GetCommitsAsync(projectId, limit: 1000, offset: 0);
+            if (commits == null || commits.Count == 0)
+                return null;
+
+            commits.Reverse();
+            var baseCommit = commits.Find(c => c.ElementCount > 0);
+            if (baseCommit != null)
+                return baseCommit;
+
+            return commits[0];
         }
 
         public async Task<ElementSnapshot> GetSnapshotAsync(string projectId, string commitId)
@@ -363,6 +406,15 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("description")]
         public string Description { get; set; }
+
+        [JsonProperty("modelId")]
+        public string ModelId { get; set; }
+
+        [JsonProperty("baseCommitId")]
+        public string BaseCommitId { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; }
     }
 
     public class CommitsResponse
@@ -378,12 +430,24 @@ namespace RevitVersionControl.Services
     {
         [JsonProperty("commitId")]
         public string CommitId { get; set; }
+
+        [JsonProperty("projectId")]
+        public string ProjectId { get; set; }
+
+        [JsonProperty("modelId")]
+        public string ModelId { get; set; }
         
         [JsonProperty("message")]
         public string Message { get; set; }
 
+        [JsonProperty("parentCommit")]
+        public string ParentCommit { get; set; }
+
         [JsonProperty("changedElements")]
         public int ChangedElements { get; set; }
+
+        [JsonProperty("elementCount")]
+        public int ElementCount { get; set; }
         
         [JsonProperty("timestamp")]
         public DateTime Timestamp { get; set; }
@@ -439,6 +503,24 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("parentCommit")]
         public string ParentCommit { get; set; }
+    }
+
+    public class CommitPackage
+    {
+        [JsonProperty("modelId")]
+        public string ModelId { get; set; }
+
+        [JsonProperty("commitMessage")]
+        public string CommitMessage { get; set; }
+
+        [JsonProperty("parentCommit")]
+        public string ParentCommit { get; set; }
+
+        [JsonProperty("changes")]
+        public List<Change> Changes { get; set; }
+
+        [JsonProperty("elementCount")]
+        public int ElementCount { get; set; }
     }
 
     public class BaseFileStatus
