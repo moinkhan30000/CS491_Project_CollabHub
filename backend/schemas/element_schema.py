@@ -36,6 +36,7 @@ class Location(BaseModel):
 
 class Element(BaseModel):
     id: str  # Revit UniqueId
+    repoGuid: Optional[str] = None
     category: str
     type: str
     familyName: Optional[str] = None

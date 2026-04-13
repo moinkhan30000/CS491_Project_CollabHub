@@ -18,6 +18,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
 
     def test_diff_preserves_element_name_for_element_id_parameter_changes(self):
         base_element = self._build_element(
+            element_id="uid-1",
+            repo_guid="repo-1",
             type_name="Generic - 200mm",
             type_value="111",
             element_name="Basic Wall : Generic - 200mm",
@@ -25,6 +27,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
             geometry_hash="oldhash",
         )
         target_element = self._build_element(
+            element_id="uid-1",
+            repo_guid="repo-1",
             type_name="Concrete - 300mm",
             type_value="222",
             element_name="Basic Wall : Concrete - 300mm",
@@ -47,6 +51,41 @@ class DiffAndOperationEngineTests(unittest.TestCase):
             "Basic Wall : Concrete - 300mm",
             change.parameterChanges[0].elementName,
         )
+        self.assertEqual("repo-1", change.repoGuid)
+
+    def test_diff_matches_same_repo_guid_even_when_unique_id_changes(self):
+        base_element = self._build_element(
+            element_id="uid-old",
+            repo_guid="repo-stable",
+            type_name="Generic - 200mm",
+            type_value="111",
+            element_name="Basic Wall : Generic - 200mm",
+            x=0.0,
+            geometry_hash="oldhash",
+        )
+        target_element = self._build_element(
+            element_id="uid-new",
+            repo_guid="repo-stable",
+            type_name="Concrete - 300mm",
+            type_value="222",
+            element_name="Basic Wall : Concrete - 300mm",
+            x=2.0,
+            geometry_hash="newhash",
+        )
+
+        diff_result = self.diff_engine.compute_diff(
+            base_elements=[base_element],
+            target_elements=[target_element],
+            base_version="base",
+            target_version="target",
+        )
+
+        self.assertEqual(1, len(diff_result.changes))
+        change = diff_result.changes[0]
+        self.assertEqual("modified", change.changeType)
+        self.assertEqual("uid-old", change.elementId)
+        self.assertEqual("repo-stable", change.repoGuid)
+        self.assertEqual("uid-new", change.newData["id"])
 
     def test_operation_payload_roundtrip_keeps_semantic_type_and_parameter_data(self):
         change = self._build_modified_change()
@@ -72,9 +111,12 @@ class DiffAndOperationEngineTests(unittest.TestCase):
             "Concrete - 300mm",
             roundtrip_change.newData["typeName"],
         )
+        self.assertEqual("repo-1", roundtrip_change.repoGuid)
 
     def test_apply_operations_reconstructs_modified_element_state(self):
         base_element = self._build_element(
+            element_id="uid-1",
+            repo_guid="repo-1",
             type_name="Generic - 200mm",
             type_value="111",
             element_name="Basic Wall : Generic - 200mm",
@@ -92,6 +134,7 @@ class DiffAndOperationEngineTests(unittest.TestCase):
         updated = updated_elements[0]
         self.assertEqual("Concrete - 300mm", updated.typeName)
         self.assertEqual("Basic Wall", updated.familyName)
+        self.assertEqual("repo-1", updated.repoGuid)
         self.assertEqual("222", updated.parameters["Type"].value)
         self.assertEqual(
             "Basic Wall : Concrete - 300mm",
@@ -102,6 +145,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
 
     def _build_modified_change(self) -> Change:
         base_element = self._build_element(
+            element_id="uid-1",
+            repo_guid="repo-1",
             type_name="Generic - 200mm",
             type_value="111",
             element_name="Basic Wall : Generic - 200mm",
@@ -109,6 +154,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
             geometry_hash="oldhash",
         )
         target_element = self._build_element(
+            element_id="uid-1-new",
+            repo_guid="repo-1",
             type_name="Concrete - 300mm",
             type_value="222",
             element_name="Basic Wall : Concrete - 300mm",
@@ -119,6 +166,7 @@ class DiffAndOperationEngineTests(unittest.TestCase):
         return Change(
             changeType="modified",
             elementId=base_element.id,
+            repoGuid=base_element.repoGuid,
             category=base_element.category,
             type=base_element.type,
             parameterChanges=[
@@ -138,6 +186,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
 
     @staticmethod
     def _build_element(
+        element_id: str,
+        repo_guid: str,
         type_name: str,
         type_value: str,
         element_name: str,
@@ -145,7 +195,8 @@ class DiffAndOperationEngineTests(unittest.TestCase):
         geometry_hash: str,
     ) -> Element:
         return Element(
-            id="uid-1",
+            id=element_id,
+            repoGuid=repo_guid,
             category="Walls",
             type=f"Basic Wall: {type_name}",
             familyName="Basic Wall",

@@ -12,6 +12,7 @@ class ParameterChange(BaseModel):
 class Change(BaseModel):
     changeType: Literal["added", "modified", "deleted"]
     elementId: str
+    repoGuid: Optional[str] = None
     category: str
     type: str
     parameterChanges: List[ParameterChange] = []

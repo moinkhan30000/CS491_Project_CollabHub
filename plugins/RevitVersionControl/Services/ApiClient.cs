@@ -557,6 +557,9 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("elementId")]
         public string ElementId { get; set; }
+
+        [JsonProperty("repoGuid")]
+        public string RepoGuid { get; set; }
         
         [JsonProperty("category")]
         public string Category { get; set; }

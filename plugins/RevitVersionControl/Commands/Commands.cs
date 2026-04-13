@@ -110,6 +110,11 @@ namespace RevitVersionControl.Commands
                 string modelId = canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.ModelId)
                     ? trackedState.ModelId
                     : doc.PathName;
+                ElementSnapshot baselineSnapshot = null;
+                if (canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.CurrentCommitId))
+                {
+                    baselineSnapshot = SnapshotCacheService.GetSnapshot(projectId, modelId, trackedState.CurrentCommitId);
+                }
 
                 if (string.IsNullOrWhiteSpace(doc.PathName) || !System.IO.File.Exists(doc.PathName))
                 {
@@ -146,6 +151,21 @@ namespace RevitVersionControl.Commands
                     }
                 }
 
+                try
+                {
+                    var knownRepoGuids = RepoGuidService.BuildKnownRepoGuidMap(baselineSnapshot);
+                    using (var guidTransaction = new Transaction(doc, "Ensure Repo GUIDs"))
+                    {
+                        guidTransaction.Start();
+                        RepoGuidService.EnsureRepoGuids(doc, knownRepoGuids);
+                        guidTransaction.Commit();
+                    }
+                }
+                catch
+                {
+                    // Repo GUID assignment is best-effort; existing UniqueId fallback remains available.
+                }
+
                 // Extract elements
                 var extractor = new ElementExtractor(doc);
                 var extractionOptions = new ExtractionOptions
@@ -177,7 +197,6 @@ namespace RevitVersionControl.Commands
 
                 if (canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.CurrentCommitId))
                 {
-                    var baselineSnapshot = SnapshotCacheService.GetSnapshot(projectId, modelId, trackedState.CurrentCommitId);
                     if (baselineSnapshot != null)
                     {
                         var localDiffEngine = new LocalDiffEngine();

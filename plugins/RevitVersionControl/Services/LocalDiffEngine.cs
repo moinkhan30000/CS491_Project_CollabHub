@@ -12,67 +12,70 @@ namespace RevitVersionControl.Services
         {
             var changes = new List<Change>();
 
-            var baseDict = ToElementMap(baseElements);
-            var targetDict = ToElementMap(targetElements);
+            var baseEntries = ToElementEntries(baseElements);
+            var targetEntries = ToElementEntries(targetElements);
+            var matchedBase = new HashSet<string>(StringComparer.Ordinal);
+            var matchedTarget = new HashSet<string>(StringComparer.Ordinal);
 
-            var addedIds = targetDict.Keys.Except(baseDict.Keys).OrderBy(id => id, StringComparer.Ordinal);
-            foreach (string elementId in addedIds)
+            foreach (var pair in MatchEntries(baseEntries, targetEntries, matchedBase, matchedTarget))
             {
-                JObject element = targetDict[elementId];
+                var change = CompareElements(pair.Base, pair.Target);
+                if (change != null)
+                    changes.Add(change);
+            }
+
+            var addedEntries = targetEntries
+                .Where(entry => !matchedTarget.Contains(entry.TrackingKey))
+                .OrderBy(entry => entry.ElementId, StringComparer.Ordinal);
+            foreach (var entry in addedEntries)
+            {
                 changes.Add(new Change
                 {
                     ChangeType = "added",
-                    ElementId = elementId,
-                    Category = element["category"]?.ToString() ?? "Unknown",
-                    Type = element["type"]?.ToString() ?? "Unknown",
+                    ElementId = entry.ElementId,
+                    RepoGuid = entry.RepoGuid,
+                    Category = entry.Element["category"]?.ToString() ?? "Unknown",
+                    Type = entry.Element["type"]?.ToString() ?? "Unknown",
                     ParameterChanges = new List<ParameterChange>(),
                     GeometryChanged = false,
                     LocationChanged = false,
                     OldData = null,
-                    NewData = ToDictionary(element),
+                    NewData = ToDictionary(entry.Element),
                 });
             }
 
-            var deletedIds = baseDict.Keys.Except(targetDict.Keys).OrderBy(id => id, StringComparer.Ordinal);
-            foreach (string elementId in deletedIds)
+            var deletedEntries = baseEntries
+                .Where(entry => !matchedBase.Contains(entry.TrackingKey))
+                .OrderBy(entry => entry.ElementId, StringComparer.Ordinal);
+            foreach (var entry in deletedEntries)
             {
-                JObject element = baseDict[elementId];
                 changes.Add(new Change
                 {
                     ChangeType = "deleted",
-                    ElementId = elementId,
-                    Category = element["category"]?.ToString() ?? "Unknown",
-                    Type = element["type"]?.ToString() ?? "Unknown",
+                    ElementId = entry.ElementId,
+                    RepoGuid = entry.RepoGuid,
+                    Category = entry.Element["category"]?.ToString() ?? "Unknown",
+                    Type = entry.Element["type"]?.ToString() ?? "Unknown",
                     ParameterChanges = new List<ParameterChange>(),
                     GeometryChanged = false,
                     LocationChanged = false,
-                    OldData = ToDictionary(element),
+                    OldData = ToDictionary(entry.Element),
                     NewData = null,
                 });
-            }
-
-            var commonIds = baseDict.Keys.Intersect(targetDict.Keys).OrderBy(id => id, StringComparer.Ordinal);
-            foreach (string elementId in commonIds)
-            {
-                JObject baseElement = baseDict[elementId];
-                JObject targetElement = targetDict[elementId];
-                var change = CompareElements(baseElement, targetElement);
-                if (change != null)
-                    changes.Add(change);
             }
 
             return changes;
         }
 
-        private static Change CompareElements(JObject baseElement, JObject targetElement)
+        private static Change CompareElements(ElementEntry baseElement, ElementEntry targetElement)
         {
             var parameterChanges = CompareParameters(
-                baseElement["parameters"] as JObject,
-                targetElement["parameters"] as JObject);
+                baseElement.Element["parameters"] as JObject,
+                targetElement.Element["parameters"] as JObject);
             bool geometryChanged = CompareGeometry(
-                baseElement["geometry"] as JObject,
-                targetElement["geometry"] as JObject);
-            bool locationChanged = !JToken.DeepEquals(baseElement["location"], targetElement["location"]);
+                baseElement.Element["geometry"] as JObject,
+                targetElement.Element["geometry"] as JObject);
+            bool locationChanged = !JToken.DeepEquals(baseElement.Element["location"], targetElement.Element["location"]);
 
             if (parameterChanges.Count == 0 && !geometryChanged && !locationChanged)
                 return null;
@@ -80,14 +83,15 @@ namespace RevitVersionControl.Services
             return new Change
             {
                 ChangeType = "modified",
-                ElementId = baseElement["id"]?.ToString(),
-                Category = baseElement["category"]?.ToString() ?? "Unknown",
-                Type = baseElement["type"]?.ToString() ?? "Unknown",
+                ElementId = baseElement.ElementId,
+                RepoGuid = baseElement.RepoGuid ?? targetElement.RepoGuid,
+                Category = baseElement.Element["category"]?.ToString() ?? "Unknown",
+                Type = baseElement.Element["type"]?.ToString() ?? "Unknown",
                 ParameterChanges = parameterChanges,
                 GeometryChanged = geometryChanged,
                 LocationChanged = locationChanged,
-                OldData = ToDictionary(baseElement),
-                NewData = ToDictionary(targetElement),
+                OldData = ToDictionary(baseElement.Element),
+                NewData = ToDictionary(targetElement.Element),
             };
         }
 
@@ -150,16 +154,68 @@ namespace RevitVersionControl.Services
             return !string.Equals(baseHash, targetHash, StringComparison.Ordinal);
         }
 
-        private static Dictionary<string, JObject> ToElementMap(IEnumerable<object> elements)
+        private static IEnumerable<(ElementEntry Base, ElementEntry Target)> MatchEntries(
+            List<ElementEntry> baseEntries,
+            List<ElementEntry> targetEntries,
+            HashSet<string> matchedBase,
+            HashSet<string> matchedTarget)
         {
-            var result = new Dictionary<string, JObject>(StringComparer.Ordinal);
+            var pairs = new List<(ElementEntry Base, ElementEntry Target)>();
+
+            var baseByRepoGuid = baseEntries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.RepoGuid))
+                .ToDictionary(entry => entry.RepoGuid, entry => entry, StringComparer.OrdinalIgnoreCase);
+            var targetByRepoGuid = targetEntries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.RepoGuid))
+                .ToDictionary(entry => entry.RepoGuid, entry => entry, StringComparer.OrdinalIgnoreCase);
+
+            foreach (string repoGuid in baseByRepoGuid.Keys.Intersect(targetByRepoGuid.Keys, StringComparer.OrdinalIgnoreCase))
+            {
+                var baseEntry = baseByRepoGuid[repoGuid];
+                var targetEntry = targetByRepoGuid[repoGuid];
+                matchedBase.Add(baseEntry.TrackingKey);
+                matchedTarget.Add(targetEntry.TrackingKey);
+                pairs.Add((baseEntry, targetEntry));
+            }
+
+            var baseById = baseEntries
+                .Where(entry => !matchedBase.Contains(entry.TrackingKey))
+                .ToDictionary(entry => entry.ElementId, entry => entry, StringComparer.Ordinal);
+            var targetById = targetEntries
+                .Where(entry => !matchedTarget.Contains(entry.TrackingKey))
+                .ToDictionary(entry => entry.ElementId, entry => entry, StringComparer.Ordinal);
+
+            foreach (string elementId in baseById.Keys.Intersect(targetById.Keys, StringComparer.Ordinal))
+            {
+                var baseEntry = baseById[elementId];
+                var targetEntry = targetById[elementId];
+                matchedBase.Add(baseEntry.TrackingKey);
+                matchedTarget.Add(targetEntry.TrackingKey);
+                pairs.Add((baseEntry, targetEntry));
+            }
+
+            return pairs;
+        }
+
+        private static List<ElementEntry> ToElementEntries(IEnumerable<object> elements)
+        {
+            var result = new List<ElementEntry>();
 
             foreach (object element in elements ?? Enumerable.Empty<object>())
             {
                 JObject obj = element as JObject ?? JObject.FromObject(element);
                 string id = obj["id"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(id))
-                    result[id] = obj;
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+
+                string repoGuid = obj["repoGuid"]?.ToString();
+                result.Add(new ElementEntry
+                {
+                    Element = obj,
+                    ElementId = id,
+                    RepoGuid = repoGuid,
+                    TrackingKey = !string.IsNullOrWhiteSpace(repoGuid) ? repoGuid : "id:" + id
+                });
             }
 
             return result;
@@ -172,6 +228,14 @@ namespace RevitVersionControl.Services
 
             return JsonConvert.DeserializeObject<Dictionary<string, object>>(
                 JsonConvert.SerializeObject(value));
+        }
+
+        private class ElementEntry
+        {
+            public JObject Element { get; set; }
+            public string ElementId { get; set; }
+            public string RepoGuid { get; set; }
+            public string TrackingKey { get; set; }
         }
     }
 }

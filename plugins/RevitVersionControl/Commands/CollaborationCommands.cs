@@ -32,6 +32,20 @@ namespace RevitVersionControl.Commands
                 string projectName = dialog.ProjectName;
                 string filePath = doc.PathName;
 
+                try
+                {
+                    using (var guidTransaction = new Transaction(doc, "Assign Repo GUIDs"))
+                    {
+                        guidTransaction.Start();
+                        RepoGuidService.EnsureRepoGuids(doc);
+                        guidTransaction.Commit();
+                    }
+                }
+                catch
+                {
+                    // Repo GUID assignment is best-effort during bootstrap.
+                }
+
                 var extractor = new ElementExtractor(doc);
                 var extractionOptions = new ExtractionOptions
                 {

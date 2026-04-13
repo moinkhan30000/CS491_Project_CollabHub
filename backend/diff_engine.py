@@ -36,20 +36,17 @@ class DiffEngine:
         self.changes = []
         self.conflicts = []
         
-        # Create lookup dictionaries by element ID
-        base_dict = {elem.id: elem for elem in base_elements}
-        target_dict = {elem.id: elem for elem in target_elements}
-        
-        base_ids = set(base_dict.keys())
-        target_ids = set(target_dict.keys())
-        
+        matched_pairs, added_elements, deleted_elements = self._match_elements(
+            base_elements,
+            target_elements,
+        )
+
         # Find added elements
-        added_ids = target_ids - base_ids
-        for elem_id in added_ids:
-            elem = target_dict[elem_id]
+        for elem in added_elements:
             self.changes.append(Change(
                 changeType="added",
-                elementId=elem_id,
+                elementId=elem.id,
+                repoGuid=elem.repoGuid,
                 category=elem.category,
                 type=elem.type,
                 parameterChanges=[],
@@ -60,12 +57,11 @@ class DiffEngine:
             ))
         
         # Find deleted elements
-        deleted_ids = base_ids - target_ids
-        for elem_id in deleted_ids:
-            elem = base_dict[elem_id]
+        for elem in deleted_elements:
             self.changes.append(Change(
                 changeType="deleted",
-                elementId=elem_id,
+                elementId=elem.id,
+                repoGuid=elem.repoGuid,
                 category=elem.category,
                 type=elem.type,
                 parameterChanges=[],
@@ -76,20 +72,16 @@ class DiffEngine:
             ))
         
         # Find modified elements
-        common_ids = base_ids & target_ids
-        for elem_id in common_ids:
-            base_elem = base_dict[elem_id]
-            target_elem = target_dict[elem_id]
-            
+        for base_elem, target_elem in matched_pairs:
             change = self._compare_elements(base_elem, target_elem)
             if change:
                 self.changes.append(change)
         
         # Compute summary
         summary = {
-            "added": len(added_ids),
+            "added": len(added_elements),
             "modified": len([c for c in self.changes if c.changeType == "modified"]),
-            "deleted": len(deleted_ids),
+            "deleted": len(deleted_elements),
             "total": len(self.changes)
         }
         
@@ -116,6 +108,7 @@ class DiffEngine:
         return Change(
             changeType="modified",
             elementId=base.id,
+            repoGuid=base.repoGuid or target.repoGuid,
             category=base.category,
             type=base.type,
             parameterChanges=param_changes,
@@ -209,8 +202,8 @@ class DiffEngine:
         conflicts = []
         
         # Create lookup by element ID
-        local_dict = {c.elementId: c for c in local_changes}
-        remote_dict = {c.elementId: c for c in remote_changes}
+        local_dict = {self._change_identity(c): c for c in local_changes}
+        remote_dict = {self._change_identity(c): c for c in remote_changes}
         
         common_ids = set(local_dict.keys()) & set(remote_dict.keys())
         
@@ -260,27 +253,33 @@ class DiffEngine:
         Returns:
             Updated list of elements
         """
-        result_dict = {elem.id: elem for elem in base_elements}
+        result_dict = {
+            self._element_identity(elem): elem for elem in base_elements
+        }
         
         for change in changes:
             # Skip if not selected
             if change.elementId not in selected_element_ids:
                 continue
             
+            identity = self._change_identity(change)
             if change.changeType == "added":
                 # Add new element from newData
                 if change.newData:
-                    result_dict[change.elementId] = Element(**change.newData)
+                    result_dict[identity] = Element(**change.newData)
             
             elif change.changeType == "deleted":
                 # Remove element
-                result_dict.pop(change.elementId, None)
+                result_dict.pop(self._find_result_key(result_dict, change), None)
             
             elif change.changeType == "modified":
                 # Update element with newData
-                if change.newData and change.elementId in result_dict:
+                result_key = self._find_result_key(result_dict, change)
+                if change.newData and result_key in result_dict:
                     # Merge changes - this is simplified; production would be more sophisticated
-                    result_dict[change.elementId] = Element(**change.newData)
+                    updated = Element(**change.newData)
+                    del result_dict[result_key]
+                    result_dict[self._element_identity(updated)] = updated
         
         return list(result_dict.values())
 
@@ -314,27 +313,33 @@ class DiffEngine:
             # Returns: [wall-1(modified), wall-3, wall-4]
         """
         # Convert to dict for fast O(1) lookup and modification
-        result_dict = {elem.id: elem for elem in base_elements}
+        result_dict = {
+            self._element_identity(elem): elem for elem in base_elements
+        }
     
         # Apply each change in order
         for change in changes:
             try:
+                identity = self._change_identity(change)
                 if change.changeType == "added":
                     # Create new element from newData
                     if change.newData:
                         new_element = Element(**change.newData)
-                        result_dict[change.elementId] = new_element
+                        result_dict[self._element_identity(new_element)] = new_element
             
                 elif change.changeType == "deleted":
                     # Remove element if it exists
-                    if change.elementId in result_dict:
-                        del result_dict[change.elementId]
+                    result_key = self._find_result_key(result_dict, change)
+                    if result_key in result_dict:
+                        del result_dict[result_key]
             
                 elif change.changeType == "modified":
                     # Replace element with updated version
-                    if change.newData and change.elementId in result_dict:
+                    result_key = self._find_result_key(result_dict, change)
+                    if change.newData and result_key in result_dict:
                         updated_element = Element(**change.newData)
-                        result_dict[change.elementId] = updated_element
+                        del result_dict[result_key]
+                        result_dict[self._element_identity(updated_element)] = updated_element
         
             except Exception as e:
                 # Log error but continue processing
@@ -343,3 +348,79 @@ class DiffEngine:
     
         # Return as list (order doesn't matter, but keep consistent)
         return list(result_dict.values())
+
+    @staticmethod
+    def _element_identity(element: Element) -> str:
+        return element.repoGuid or element.id
+
+    @staticmethod
+    def _change_identity(change: Change) -> str:
+        return change.repoGuid or change.elementId
+
+    def _find_result_key(self, result_dict: Dict[str, Element], change: Change) -> str | None:
+        identity = self._change_identity(change)
+        if identity in result_dict:
+            return identity
+
+        for key, element in result_dict.items():
+            if change.repoGuid and element.repoGuid == change.repoGuid:
+                return key
+            if element.id == change.elementId:
+                return key
+
+        return None
+
+    def _match_elements(
+        self,
+        base_elements: List[Element],
+        target_elements: List[Element],
+    ) -> tuple[list[tuple[Element, Element]], list[Element], list[Element]]:
+        matched_pairs: list[tuple[Element, Element]] = []
+        matched_base: set[int] = set()
+        matched_target: set[int] = set()
+
+        base_by_repo_guid = {
+            elem.repoGuid: (idx, elem)
+            for idx, elem in enumerate(base_elements)
+            if elem.repoGuid
+        }
+        target_by_repo_guid = {
+            elem.repoGuid: (idx, elem)
+            for idx, elem in enumerate(target_elements)
+            if elem.repoGuid
+        }
+
+        for repo_guid in set(base_by_repo_guid.keys()) & set(target_by_repo_guid.keys()):
+            base_idx, base_elem = base_by_repo_guid[repo_guid]
+            target_idx, target_elem = target_by_repo_guid[repo_guid]
+            matched_base.add(base_idx)
+            matched_target.add(target_idx)
+            matched_pairs.append((base_elem, target_elem))
+
+        base_by_id = {
+            elem.id: (idx, elem)
+            for idx, elem in enumerate(base_elements)
+            if idx not in matched_base
+        }
+        target_by_id = {
+            elem.id: (idx, elem)
+            for idx, elem in enumerate(target_elements)
+            if idx not in matched_target
+        }
+
+        for element_id in set(base_by_id.keys()) & set(target_by_id.keys()):
+            base_idx, base_elem = base_by_id[element_id]
+            target_idx, target_elem = target_by_id[element_id]
+            matched_base.add(base_idx)
+            matched_target.add(target_idx)
+            matched_pairs.append((base_elem, target_elem))
+
+        added = [
+            elem for idx, elem in enumerate(target_elements)
+            if idx not in matched_target
+        ]
+        deleted = [
+            elem for idx, elem in enumerate(base_elements)
+            if idx not in matched_base
+        ]
+        return matched_pairs, added, deleted

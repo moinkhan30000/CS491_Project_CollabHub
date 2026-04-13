@@ -120,6 +120,7 @@ namespace RevitVersionControl.Services
             if (location != null && !location.HasValues)
                 location = null;
 
+            string repoGuid = RepoGuidService.GetRepoGuid(element);
             var elementData = new JObject
             {
                 ["id"] = element.UniqueId,
@@ -129,6 +130,9 @@ namespace RevitVersionControl.Services
                 ["location"] = location,
                 ["geometry"] = includeGeometry ? ExtractGeometry(element, location) : null
             };
+
+            if (!string.IsNullOrWhiteSpace(repoGuid))
+                elementData["repoGuid"] = repoGuid;
 
             var typeInfo = GetElementTypeInfo(element);
             if (typeInfo.HasValue)
@@ -445,7 +449,7 @@ namespace RevitVersionControl.Services
 
         private JObject ExtractMinimalElement(Element element)
         {
-            return new JObject
+            var data = new JObject
             {
                 ["id"] = element.UniqueId,
                 ["category"] = element.Category?.Name ?? "Unknown",
@@ -455,6 +459,12 @@ namespace RevitVersionControl.Services
                 ["location"] = null,
                 ["geometry"] = null
             };
+
+            string repoGuid = RepoGuidService.GetRepoGuid(element);
+            if (!string.IsNullOrWhiteSpace(repoGuid))
+                data["repoGuid"] = repoGuid;
+
+            return data;
         }
 
         private JObject ExtractLinkElement(RevitLinkInstance linkInstance)
@@ -501,7 +511,7 @@ namespace RevitVersionControl.Services
                 location = null;
             }
 
-            return new JObject
+            var data = new JObject
             {
                 ["id"] = linkInstance.UniqueId,
                 ["category"] = linkInstance.Category?.Name ?? "RVT Links",
@@ -511,6 +521,12 @@ namespace RevitVersionControl.Services
                 ["location"] = location,
                 ["geometry"] = null
             };
+
+            string repoGuid = RepoGuidService.GetRepoGuid(linkInstance);
+            if (!string.IsNullOrWhiteSpace(repoGuid))
+                data["repoGuid"] = repoGuid;
+
+            return data;
         }
 
         private static void LogProgress(string message)

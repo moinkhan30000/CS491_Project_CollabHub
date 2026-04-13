@@ -18,6 +18,7 @@ class OperationEngine:
                     Operation(
                         op="create_native",
                         elementId=change.elementId,
+                        repoGuid=self._change_repo_guid(change),
                         category=change.category,
                         type=change.type,
                         newTypeName=self._read_dict_value(change.newData, "typeName"),
@@ -35,6 +36,7 @@ class OperationEngine:
                     Operation(
                         op="delete",
                         elementId=change.elementId,
+                        repoGuid=self._change_repo_guid(change),
                         category=change.category,
                         type=change.type,
                         oldData=change.oldData,
@@ -51,12 +53,14 @@ class OperationEngine:
         ordered_ids: List[str] = []
 
         for op in payload.operations:
+            identity = self._operation_identity(op)
             if op.op in {"create_native", "create_by_copy"}:
-                if op.elementId not in ordered_ids:
-                    ordered_ids.append(op.elementId)
-                changes_by_element[op.elementId] = Change(
+                if identity not in ordered_ids:
+                    ordered_ids.append(identity)
+                changes_by_element[identity] = Change(
                     changeType="added",
                     elementId=op.elementId,
+                    repoGuid=op.repoGuid,
                     category=op.category or self._read_dict_value(op.newData, "category") or "Unknown",
                     type=op.type or self._read_dict_value(op.newData, "type") or "Unknown",
                     parameterChanges=[],
@@ -68,11 +72,12 @@ class OperationEngine:
                 continue
 
             if op.op == "delete":
-                if op.elementId not in ordered_ids:
-                    ordered_ids.append(op.elementId)
-                changes_by_element[op.elementId] = Change(
+                if identity not in ordered_ids:
+                    ordered_ids.append(identity)
+                changes_by_element[identity] = Change(
                     changeType="deleted",
                     elementId=op.elementId,
+                    repoGuid=op.repoGuid,
                     category=op.category or self._read_dict_value(op.oldData, "category") or "Unknown",
                     type=op.type or self._read_dict_value(op.oldData, "type") or "Unknown",
                     parameterChanges=[],
@@ -83,11 +88,12 @@ class OperationEngine:
                 )
                 continue
 
-            existing = changes_by_element.get(op.elementId)
+            existing = changes_by_element.get(identity)
             if existing is None or existing.changeType != "modified":
                 existing = Change(
                     changeType="modified",
                     elementId=op.elementId,
+                    repoGuid=op.repoGuid,
                     category=op.category or self._read_dict_value(op.newData, "category")
                              or self._read_dict_value(op.oldData, "category") or "Unknown",
                     type=op.type or self._read_dict_value(op.newData, "type")
@@ -98,14 +104,16 @@ class OperationEngine:
                     oldData=op.oldData,
                     newData=op.newData,
                 )
-                changes_by_element[op.elementId] = existing
-                if op.elementId not in ordered_ids:
-                    ordered_ids.append(op.elementId)
+                changes_by_element[identity] = existing
+                if identity not in ordered_ids:
+                    ordered_ids.append(identity)
             else:
                 if existing.oldData is None and op.oldData is not None:
                     existing.oldData = op.oldData
                 if op.newData is not None:
                     existing.newData = op.newData
+                if existing.repoGuid is None and op.repoGuid is not None:
+                    existing.repoGuid = op.repoGuid
 
             if op.op == "set_parameter":
                 existing.parameterChanges.append(
@@ -131,23 +139,34 @@ class OperationEngine:
         operations: List[Operation],
     ) -> List[Element]:
         result_dict: Dict[str, Dict[str, Any]] = {
-            elem.id: elem.model_dump() for elem in base_elements
+            self._element_identity_data(elem.model_dump()): elem.model_dump()
+            for elem in base_elements
         }
 
         for op in operations:
+            identity = self._operation_identity(op)
             if op.op in {"create_native", "create_by_copy"}:
                 if op.newData:
-                    result_dict[op.elementId] = deepcopy(op.newData)
+                    new_element = deepcopy(op.newData)
+                    if op.repoGuid and "repoGuid" not in new_element:
+                        new_element["repoGuid"] = op.repoGuid
+                    result_dict[self._element_identity_data(new_element)] = new_element
                 continue
 
             if op.op == "delete":
-                result_dict.pop(op.elementId, None)
+                result_key = self._find_result_key(result_dict, op)
+                if result_key is not None:
+                    result_dict.pop(result_key, None)
                 continue
 
-            current = result_dict.get(op.elementId)
+            result_key = self._find_result_key(result_dict, op)
+            current = result_dict.get(result_key) if result_key is not None else None
             if current is None:
                 if op.newData:
-                    result_dict[op.elementId] = deepcopy(op.newData)
+                    new_element = deepcopy(op.newData)
+                    if op.repoGuid and "repoGuid" not in new_element:
+                        new_element["repoGuid"] = op.repoGuid
+                    result_dict[self._element_identity_data(new_element)] = new_element
                 continue
 
             if op.op == "set_parameter":
@@ -157,12 +176,22 @@ class OperationEngine:
             elif op.op in {"move", "rotate"}:
                 self._apply_location_op(current, op)
 
+            if op.repoGuid is not None:
+                current["repoGuid"] = op.repoGuid
+
             if op.newData is not None:
+                current["id"] = op.newData.get("id", current.get("id"))
+                current["repoGuid"] = op.newData.get("repoGuid", current.get("repoGuid"))
                 current["type"] = op.newData.get("type", current.get("type"))
                 current["familyName"] = op.newData.get("familyName", current.get("familyName"))
                 current["typeName"] = op.newData.get("typeName", current.get("typeName"))
                 current["geometry"] = op.newData.get("geometry", current.get("geometry"))
                 current["location"] = op.newData.get("location", current.get("location"))
+
+            updated_key = self._element_identity_data(current)
+            if result_key is not None and updated_key != result_key:
+                del result_dict[result_key]
+                result_dict[updated_key] = current
 
         return [Element(**data) for data in result_dict.values()]
 
@@ -176,6 +205,7 @@ class OperationEngine:
                 Operation(
                     op="change_type",
                     elementId=change.elementId,
+                    repoGuid=self._change_repo_guid(change),
                     category=change.category,
                     type=change.type,
                     oldTypeName=self._read_dict_value(old_data, "typeName"),
@@ -191,6 +221,7 @@ class OperationEngine:
                 Operation(
                     op="set_parameter",
                     elementId=change.elementId,
+                    repoGuid=self._change_repo_guid(change),
                     category=change.category,
                     type=change.type,
                     parameter=param_change.name,
@@ -211,6 +242,7 @@ class OperationEngine:
                 Operation(
                     op="move",
                     elementId=change.elementId,
+                    repoGuid=self._change_repo_guid(change),
                     category=change.category,
                     type=change.type,
                     oldLocation=old_location,
@@ -228,6 +260,7 @@ class OperationEngine:
                     Operation(
                         op="rotate",
                         elementId=change.elementId,
+                        repoGuid=self._change_repo_guid(change),
                         category=change.category,
                         type=change.type,
                         oldLocation=old_location,
@@ -253,6 +286,32 @@ class OperationEngine:
             OperationEngine._read_dict_value(data, "typeName"),
             OperationEngine._read_dict_value(data, "type"),
         )
+
+    @staticmethod
+    def _change_repo_guid(change: Change) -> Any:
+        return change.repoGuid or OperationEngine._read_dict_value(change.newData, "repoGuid") \
+            or OperationEngine._read_dict_value(change.oldData, "repoGuid")
+
+    @staticmethod
+    def _operation_identity(op: Operation) -> str:
+        return op.repoGuid or op.elementId
+
+    @staticmethod
+    def _element_identity_data(data: Dict[str, Any]) -> str:
+        return (data or {}).get("repoGuid") or (data or {}).get("id")
+
+    def _find_result_key(self, result_dict: Dict[str, Dict[str, Any]], op: Operation) -> Optional[str]:
+        identity = self._operation_identity(op)
+        if identity in result_dict:
+            return identity
+
+        for key, element in result_dict.items():
+            if op.repoGuid and element.get("repoGuid") == op.repoGuid:
+                return key
+            if element.get("id") == op.elementId:
+                return key
+
+        return None
 
     def _apply_parameter_op(self, element: Dict[str, Any], op: Operation) -> None:
         parameters = element.setdefault("parameters", {})

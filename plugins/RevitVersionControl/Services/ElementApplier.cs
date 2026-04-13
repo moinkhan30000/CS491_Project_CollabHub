@@ -126,7 +126,7 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                Element element = _document.GetElement(change.ElementId);
+                Element element = ResolveElement(change);
 
                 if (element != null && !element.Pinned)
                 {
@@ -163,8 +163,7 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                Element element = null;
-                try { element = _document.GetElement(change.ElementId); } catch { }
+                Element element = ResolveElement(change);
 
                 if (element == null)
                 {
@@ -178,6 +177,8 @@ namespace RevitVersionControl.Services
                     _errors.Add($"Modified: Element {change.ElementId} not found");
                     return;
                 }
+
+                TryEnsureRepoGuid(element, change.RepoGuid);
 
                 bool modified = false;
                 var oldData = change.OldData != null ? JObject.FromObject(change.OldData) : null;
@@ -242,6 +243,9 @@ namespace RevitVersionControl.Services
                     _errors.Add($"Add failed for {change.ElementId}: {result.Reason}");
                     return;
                 }
+
+                string repoGuid = change.RepoGuid ?? newData["repoGuid"]?.ToString();
+                TryEnsureRepoGuid(result.Element, repoGuid);
 
                 var parameters = newData["parameters"] as JObject;
                 if (parameters != null)
@@ -606,6 +610,26 @@ namespace RevitVersionControl.Services
             }
 
             return "Unknown";
+        }
+
+        private Element ResolveElement(Change change)
+        {
+            if (change == null)
+                return null;
+
+            return RepoGuidService.FindElement(_document, change.RepoGuid, change.ElementId);
+        }
+
+        private static void TryEnsureRepoGuid(Element element, string repoGuid)
+        {
+            if (element == null || string.IsNullOrWhiteSpace(repoGuid))
+                return;
+
+            string existing = RepoGuidService.GetRepoGuid(element);
+            if (string.Equals(existing, repoGuid, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            RepoGuidService.SetRepoGuid(element, repoGuid);
         }
     }
 }
