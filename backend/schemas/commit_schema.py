@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from schemas.element_schema import ElementSnapshot
 from schemas.diff_schema import Change
+from schemas.operation_schema import PayloadRef
 
 class CommitCreate(BaseModel):
     modelId: str
@@ -17,6 +18,8 @@ class CommitPackageCreate(BaseModel):
     parentCommit: str
     changes: List[Change]
     elementCount: int
+    payloadRefs: List[PayloadRef] = Field(default_factory=list)
+    checkpointSnapshot: Optional[ElementSnapshot] = None
 
 class AuthorInfo(BaseModel):
     userId: str

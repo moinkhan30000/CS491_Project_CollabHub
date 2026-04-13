@@ -208,7 +208,8 @@ namespace RevitVersionControl
             data.InitialState = new DockablePaneState { DockPosition = DockPosition.Right };
         }
 
-        public void LoadPullResult(object result) => _diffMergePane?.LoadPullResult(result as PullResult);
+        public void LoadPullResult(object result, string projectId = null) =>
+            _diffMergePane?.LoadPullResult(result as PullResult, projectId);
         public void LoadDiffResult(object result) => _diffMergePane?.LoadDiffResult(result as DiffResult);
         public void Clear() => _diffMergePane?.Clear();
     }

@@ -94,9 +94,10 @@ namespace RevitVersionControl.Commands
             {
                 UIApplication uiApp = commandData.Application;
                 Document doc = uiApp.ActiveUIDocument.Document;
+                bool hasUnsavedChanges = doc.IsModified;
 
                 // Show publish dialog
-                var publishDialog = new PublishDialog(doc.PathName);
+                var publishDialog = new PublishDialog(doc.PathName, hasUnsavedChanges);
                 var result = publishDialog.ShowDialog();
 
                 if (result != true)
@@ -104,6 +105,7 @@ namespace RevitVersionControl.Commands
 
                 string commitMessage = publishDialog.CommitMessage;
                 string projectId = publishDialog.SelectedProjectId;
+                var apiClient = ApiClient.Instance;
                 var trackedState = DocumentSyncStateService.GetStateForProject(doc.PathName, projectId);
                 bool canUseTrackedState = trackedState != null
                                           && string.Equals(trackedState.ProjectId, projectId, StringComparison.OrdinalIgnoreCase);
@@ -114,6 +116,18 @@ namespace RevitVersionControl.Commands
                 if (canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.CurrentCommitId))
                 {
                     baselineSnapshot = SnapshotCacheService.GetSnapshot(projectId, modelId, trackedState.CurrentCommitId);
+                    if (baselineSnapshot == null)
+                    {
+                        var baselineTask = Task.Run(async () =>
+                            await apiClient.GetSnapshotAsync(projectId, trackedState.CurrentCommitId));
+                        baselineSnapshot = baselineTask.GetAwaiter().GetResult();
+                        if (baselineSnapshot != null)
+                        {
+                            baselineSnapshot.ProjectId = projectId;
+                            baselineSnapshot.ModelId = modelId;
+                            SnapshotCacheService.SaveSnapshot(projectId, modelId, trackedState.CurrentCommitId, baselineSnapshot);
+                        }
+                    }
                 }
 
                 if (string.IsNullOrWhiteSpace(doc.PathName) || !System.IO.File.Exists(doc.PathName))
@@ -122,7 +136,12 @@ namespace RevitVersionControl.Commands
                     return Result.Failed;
                 }
 
-                var apiClient = ApiClient.Instance;
+                if (hasUnsavedChanges && PayloadSupportService.HasUnsavedPayloadBackedAdditions(doc, baselineSnapshot))
+                {
+                    TaskDialog.Show("Save Required", PayloadSupportService.SaveRequiredMessage);
+                    return Result.Failed;
+                }
+
                 var baseStatusTask = Task.Run(async () =>
                     await apiClient.GetBaseFileStatusAsync(projectId, modelId));
                 var baseStatus = baseStatusTask.Result;
@@ -194,6 +213,7 @@ namespace RevitVersionControl.Commands
                 Commit commit = null;
                 bool usedPackagePublish = false;
                 string packageFallbackReason = null;
+                bool requiresPayloadBackedPublish = false;
 
                 if (canUseTrackedState && !string.IsNullOrWhiteSpace(trackedState.CurrentCommitId))
                 {
@@ -208,17 +228,41 @@ namespace RevitVersionControl.Commands
                             return Result.Succeeded;
                         }
 
+                        var payloadPreparation = PayloadSupportService.PreparePayloadBackedChanges(
+                            doc,
+                            projectId,
+                            changes,
+                            hasUnsavedChanges);
+                        if (!payloadPreparation.Success)
+                        {
+                            TaskDialog.Show("Error", payloadPreparation.ErrorMessage);
+                            return Result.Failed;
+                        }
+                        requiresPayloadBackedPublish = payloadPreparation.PayloadRefs != null
+                                                       && payloadPreparation.PayloadRefs.Count > 0;
+
                         var package = new CommitPackage
                         {
                             ModelId = modelId,
                             CommitMessage = commitMessage,
                             ParentCommit = trackedState.CurrentCommitId,
                             Changes = changes,
-                            ElementCount = extractedElements.Count
+                            ElementCount = extractedElements.Count,
+                            PayloadRefs = payloadPreparation.PayloadRefs,
+                            CheckpointSnapshot = null,
                         };
 
                         var packageTask = Task.Run(async () => await ApiClient.Instance.PublishPackageAsync(projectId, package));
                         commit = packageTask.GetAwaiter().GetResult();
+                        if (commit == null
+                            && !string.IsNullOrWhiteSpace(apiClient.LastError)
+                            && apiClient.LastError.Contains("Checkpoint required", StringComparison.OrdinalIgnoreCase))
+                        {
+                            package.CheckpointSnapshot = snapshot;
+                            packageTask = Task.Run(async () => await ApiClient.Instance.PublishPackageAsync(projectId, package));
+                            commit = packageTask.GetAwaiter().GetResult();
+                        }
+
                         if (commit != null)
                         {
                             usedPackagePublish = true;
@@ -238,6 +282,16 @@ namespace RevitVersionControl.Commands
 
                 if (commit == null)
                 {
+                    if (requiresPayloadBackedPublish)
+                    {
+                        string payloadFallbackError = string.IsNullOrWhiteSpace(packageFallbackReason)
+                            ? "Payload-backed additions require successful package publish. Full snapshot fallback is disabled for this publish."
+                            : "Payload-backed additions require successful package publish. Full snapshot fallback is disabled for this publish.\n\n"
+                              + packageFallbackReason;
+                        TaskDialog.Show("Error", payloadFallbackError);
+                        return Result.Failed;
+                    }
+
                     var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot));
                     commit = publishTask.GetAwaiter().GetResult();
                 }
@@ -379,7 +433,7 @@ namespace RevitVersionControl.Commands
 
                 if (diffPane != null)
                 {
-                    DiffMergePaneProvider.Instance?.LoadPullResult(pullResult);
+                    DiffMergePaneProvider.Instance?.LoadPullResult(pullResult, projectId);
                     diffPane.Show();
                 }
 
@@ -414,7 +468,13 @@ namespace RevitVersionControl.Commands
                 ElementApplier.ApplyResult applyResponse = null;
                 try
                 {
-                    var applier = new ElementApplier(doc);
+                    if (!PayloadSupportService.EnsurePayloadsAvailable(projectId, pullResult.Changes, out string payloadError))
+                    {
+                        TaskDialog.Show("Error", payloadError);
+                        return Result.Failed;
+                    }
+
+                    var applier = new ElementApplier(doc, projectId);
                     applyResponse = applier.ApplyChanges(pullResult.Changes);
                 }
                 finally

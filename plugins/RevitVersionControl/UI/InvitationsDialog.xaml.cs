@@ -96,6 +96,7 @@ namespace RevitVersionControl.UI
                      if (result == savePath)
                      {
                          DownloadedFilePath = savePath;
+                         DocumentSyncStateService.SaveAcceptedDocumentHint(savePath, AcceptedProjectId);
                          await TrackAcceptedProjectAsync(savePath);
                          
                          // Ask user if they want to open the project now

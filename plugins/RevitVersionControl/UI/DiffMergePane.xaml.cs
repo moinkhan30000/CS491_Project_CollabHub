@@ -14,6 +14,7 @@ namespace RevitVersionControl.UI
     {
         private List<Change> _currentChanges = new List<Change>();
         private Autodesk.Revit.DB.Document _currentDocument;
+        private string _currentProjectId;
 
         public DiffMergePane()
         {
@@ -29,6 +30,7 @@ namespace RevitVersionControl.UI
         {
             if (diffResult == null) { Clear(); return; }
 
+            _currentProjectId = null;
             BaseCommitText.Text = diffResult.BaseVersion ?? "-";
             TargetCommitText.Text = diffResult.TargetVersion ?? "-";
 
@@ -44,10 +46,11 @@ namespace RevitVersionControl.UI
             ChangesListView.ItemsSource = BuildChangeItems(_currentChanges);
         }
 
-        public void LoadPullResult(PullResult pullResult)
+        public void LoadPullResult(PullResult pullResult, string projectId = null)
         {
             if (pullResult == null) { Clear(); return; }
 
+            _currentProjectId = projectId;
             BaseCommitText.Text = "-";
             TargetCommitText.Text = "-";
 
@@ -69,6 +72,7 @@ namespace RevitVersionControl.UI
             DeletedCountText.Text = "0";
             ChangesListView.ItemsSource = null;
             _currentChanges.Clear();
+            _currentProjectId = null;
         }
 
         private void SelectAll_Click(object sender, RoutedEventArgs e)
@@ -123,7 +127,17 @@ namespace RevitVersionControl.UI
 
             try
             {
-                var applier = new ElementApplier(_currentDocument);
+                string projectId = _currentProjectId
+                    ?? DocumentSyncStateService.GetState(_currentDocument.PathName)?.ProjectId;
+
+                if (!PayloadSupportService.EnsurePayloadsAvailable(projectId, selectedChanges, out string payloadError))
+                {
+                    MessageBox.Show(payloadError, "Apply Selected",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var applier = new ElementApplier(_currentDocument, projectId);
                 var result = applier.ApplyChanges(selectedChanges);
 
                 bool hasIssues = result.Errors.Count > 0

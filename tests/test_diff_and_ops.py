@@ -143,6 +143,53 @@ class DiffAndOperationEngineTests(unittest.TestCase):
         self.assertEqual(1.0, updated.location.point.x)
         self.assertEqual("newhash", updated.geometry.geometryHash)
 
+    def test_payload_backed_additions_roundtrip_as_create_by_copy(self):
+        added_element = self._build_element(
+            element_id="uid-stair-1",
+            repo_guid="repo-stair-1",
+            type_name="Assembled Stair",
+            type_value="stair-type",
+            element_name="Assembled Stair : Default",
+            x=3.0,
+            geometry_hash="stairhash",
+        )
+        added_element = added_element.model_copy(
+            update={
+                "category": "Stairs",
+                "type": "Stairs",
+                "familyName": "Assembled Stair",
+            }
+        )
+        new_data = added_element.model_dump()
+        new_data["createStrategy"] = "payload_copy"
+        new_data["payloadId"] = "payload-123"
+        new_data["payloadMarker"] = "repo-stair-1"
+
+        change = Change(
+            changeType="added",
+            elementId=added_element.id,
+            repoGuid=added_element.repoGuid,
+            category=added_element.category,
+            type=added_element.type,
+            parameterChanges=[],
+            geometryChanged=False,
+            locationChanged=False,
+            oldData=None,
+            newData=new_data,
+        )
+
+        payload = self.operation_engine.build_payload_from_changes([change])
+
+        self.assertEqual(1, len(payload.operations))
+        self.assertEqual("create_by_copy", payload.operations[0].op)
+        self.assertEqual("payload-123", payload.operations[0].payload)
+        self.assertEqual("repo-stair-1", payload.operations[0].marker)
+
+        roundtrip_change = self.operation_engine.to_changes(payload)[0]
+        self.assertEqual("added", roundtrip_change.changeType)
+        self.assertEqual("payload-123", roundtrip_change.newData["payloadId"])
+        self.assertEqual("repo-stair-1", roundtrip_change.newData["payloadMarker"])
+
     def _build_modified_change(self) -> Change:
         base_element = self._build_element(
             element_id="uid-1",

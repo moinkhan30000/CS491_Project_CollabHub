@@ -3,20 +3,30 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from schemas.diff_schema import Change, ParameterChange
 from schemas.element_schema import Element
-from schemas.operation_schema import Operation, OpsCommitPayload
+from schemas.operation_schema import Operation, OpsCommitPayload, PayloadRef
 
 
 class OperationEngine:
     """Build and replay semantic operation payloads for delta commits."""
 
-    def build_payload_from_changes(self, changes: List[Change]) -> OpsCommitPayload:
+    def build_payload_from_changes(
+        self,
+        changes: List[Change],
+        payload_refs: Optional[List[PayloadRef]] = None,
+    ) -> OpsCommitPayload:
         operations: List[Operation] = []
+        payload_refs = payload_refs or []
 
         for change in changes or []:
             if change.changeType == "added":
+                payload_id = self._read_dict_value(change.newData, "payloadId") \
+                    or self._read_dict_value(change.newData, "payload")
+                marker = self._read_dict_value(change.newData, "payloadMarker") \
+                    or self._change_repo_guid(change) \
+                    or change.elementId
                 operations.append(
                     Operation(
-                        op="create_native",
+                        op="create_by_copy" if payload_id else "create_native",
                         elementId=change.elementId,
                         repoGuid=self._change_repo_guid(change),
                         category=change.category,
@@ -25,6 +35,8 @@ class OperationEngine:
                         newFamilyName=self._read_dict_value(change.newData, "familyName"),
                         hostId=self._read_dict_value(change.newData, "hostId"),
                         geometry=self._read_dict_value(change.newData, "geometry"),
+                        payload=payload_id,
+                        marker=marker,
                         oldData=change.oldData,
                         newData=change.newData,
                     )
@@ -46,7 +58,11 @@ class OperationEngine:
 
             operations.extend(self._build_modified_operations(change))
 
-        return OpsCommitPayload(commitFormat="ops", operations=operations)
+        return OpsCommitPayload(
+            commitFormat="ops",
+            operations=operations,
+            payloadRefs=payload_refs,
+        )
 
     def to_changes(self, payload: OpsCommitPayload) -> List[Change]:
         changes_by_element: Dict[str, Change] = {}
@@ -55,6 +71,13 @@ class OperationEngine:
         for op in payload.operations:
             identity = self._operation_identity(op)
             if op.op in {"create_native", "create_by_copy"}:
+                new_data = deepcopy(op.newData) if op.newData is not None else {}
+                if op.op == "create_by_copy":
+                    if op.payload and "payloadId" not in new_data and "payload" not in new_data:
+                        new_data["payloadId"] = op.payload
+                    if op.marker and "payloadMarker" not in new_data:
+                        new_data["payloadMarker"] = op.marker
+                    new_data.setdefault("createStrategy", "payload_copy")
                 if identity not in ordered_ids:
                     ordered_ids.append(identity)
                 changes_by_element[identity] = Change(
@@ -67,7 +90,7 @@ class OperationEngine:
                     geometryChanged=False,
                     locationChanged=False,
                     oldData=op.oldData,
-                    newData=op.newData,
+                    newData=new_data,
                 )
                 continue
 

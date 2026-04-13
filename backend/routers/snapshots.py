@@ -129,13 +129,19 @@ async def create_commit_package(
         )
 
     delta_depth = commit_repo.count_delta_depth(package_data.parentCommit)
+    ops_payload = operation_engine.build_payload_from_changes(
+        package_data.changes,
+        package_data.payloadRefs,
+    )
+    checkpoint_snapshot = None
     if delta_depth >= _RESNAPSHOT_INTERVAL:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Checkpoint required. Publish a full snapshot for this commit.",
-        )
+        if package_data.checkpointSnapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Checkpoint required. Publish a full snapshot for this commit.",
+            )
+        checkpoint_snapshot = package_data.checkpointSnapshot
 
-    ops_payload = operation_engine.build_payload_from_changes(package_data.changes)
     commit = commit_repo.create_commit(
         project_id=project_id,
         model_id=package_data.modelId,
@@ -143,7 +149,7 @@ async def create_commit_package(
         author=user_id,
         storage_url=None,
         parent_commit=package_data.parentCommit,
-        snapshot=None,
+        snapshot=checkpoint_snapshot,
         diff=None,
         ops_payload=ops_payload,
         element_count=package_data.elementCount,
@@ -198,6 +204,23 @@ async def list_commits(
         enriched_commits.append(commit_dict)
 
     return {"commits": enriched_commits, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{project_id}/commits/root", response_model=CommitSummary)
+async def get_root_commit(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Get the root/base commit for a project."""
+    project = project_repo.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    commit = commit_repo.get_root_commit(project_id)
+    if not commit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root commit not found")
+
+    return _build_summary(commit, commit.author, user_repo)
 
 
 @router.get("/{project_id}/commits/{commit_id}", response_model=CommitDetail)

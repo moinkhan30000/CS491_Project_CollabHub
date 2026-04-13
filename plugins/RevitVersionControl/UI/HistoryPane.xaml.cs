@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using RevitVersionControl.Services;
 
@@ -69,7 +70,20 @@ namespace RevitVersionControl.UI
             try
             {
                 CommitListView.ItemsSource = null;
-                var commits = await _apiClient.GetCommitsAsync(projectId);
+                var commits = await _apiClient.GetCommitsAsync(projectId, limit: 1000);
+                var latestCommit = await _apiClient.GetLatestCommitAsync(projectId);
+                var rootCommit = await _apiClient.GetProjectRootCommitAsync(projectId);
+                if (latestCommit != null && commits.TrueForAll(c => c.CommitId != latestCommit.CommitId))
+                    commits.Insert(0, latestCommit);
+                if (rootCommit != null && commits.TrueForAll(c => c.CommitId != rootCommit.CommitId))
+                    commits.Add(rootCommit);
+
+                commits = commits
+                    .GroupBy(c => c.CommitId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(c => c.Timestamp)
+                    .ToList();
+
                 var items = new List<CommitItem>();
                 foreach (var commit in commits)
                 {

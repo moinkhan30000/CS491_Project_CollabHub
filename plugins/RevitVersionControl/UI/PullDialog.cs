@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -141,7 +142,20 @@ namespace RevitVersionControl.UI
                 CurrentCommitComboBox.IsEnabled = true;
                 CurrentVersionStatusText.Foreground = System.Windows.SystemColors.ControlTextBrush;
 
-                var commits = await _apiClient.GetCommitsAsync(projectId);
+                var commits = await _apiClient.GetCommitsAsync(projectId, limit: 1000);
+                var latestCommit = await _apiClient.GetLatestCommitAsync(projectId);
+                var rootCommit = await _apiClient.GetProjectRootCommitAsync(projectId);
+                if (latestCommit != null && commits.TrueForAll(c => c.CommitId != latestCommit.CommitId))
+                    commits.Insert(0, latestCommit);
+                if (rootCommit != null && commits.TrueForAll(c => c.CommitId != rootCommit.CommitId))
+                    commits.Add(rootCommit);
+
+                commits = commits
+                    .GroupBy(c => c.CommitId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(c => c.Timestamp)
+                    .ToList();
+
                 var commitItems = new List<CommitItem>();
                 foreach (var commit in commits)
                 {
@@ -165,6 +179,24 @@ namespace RevitVersionControl.UI
                     trackedCurrent = commitItems.Find(c => c.CommitId == _syncStatus.State.CurrentCommitId);
                     if (trackedCurrent != null)
                     {
+                        CurrentCommitComboBox.SelectedItem = trackedCurrent;
+                        CurrentCommitComboBox.IsEnabled = false;
+                    }
+                }
+
+                if (trackedCurrent == null
+                    && rootCommit != null
+                    && DocumentSyncStateService.WasAcceptedDocumentForProject(_documentPath, projectId))
+                {
+                    trackedCurrent = commitItems.Find(c => c.CommitId == rootCommit.CommitId);
+                    if (trackedCurrent != null)
+                    {
+                        DocumentSyncStateService.SaveState(
+                            _documentPath,
+                            projectId,
+                            rootCommit.ModelId ?? _documentPath,
+                            rootCommit.CommitId);
+                        _syncStatus = DocumentSyncStateService.GetStatusForProject(_documentPath, projectId, _hasUnsavedChanges);
                         CurrentCommitComboBox.SelectedItem = trackedCurrent;
                         CurrentCommitComboBox.IsEnabled = false;
                     }

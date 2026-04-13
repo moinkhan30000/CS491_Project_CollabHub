@@ -21,6 +21,7 @@ namespace RevitVersionControl.Services
         private readonly string _baseUrl;
         private string _authToken;
         public string LastError { get; private set; }
+        public string CurrentUserEmail { get; private set; }
 
         public bool IsLoggedIn => !string.IsNullOrEmpty(_authToken);
 
@@ -49,6 +50,7 @@ namespace RevitVersionControl.Services
             if (response != null && !string.IsNullOrEmpty(response.AccessToken))
             {
                 SetAuthToken(response.AccessToken);
+                CurrentUserEmail = email?.Trim();
                 return true;
             }
             
@@ -70,6 +72,7 @@ namespace RevitVersionControl.Services
             if (response != null && !string.IsNullOrEmpty(response.AccessToken))
             {
                 SetAuthToken(response.AccessToken);
+                CurrentUserEmail = email?.Trim();
                 return true;
             }
             
@@ -79,6 +82,7 @@ namespace RevitVersionControl.Services
         public void Logout()
         {
             _authToken = null;
+            CurrentUserEmail = null;
             _httpClient.DefaultRequestHeaders.Remove("Authorization");
             try 
             {
@@ -228,26 +232,12 @@ namespace RevitVersionControl.Services
 
         public async Task<Commit> GetProjectRootCommitAsync(string projectId)
         {
-            var commits = await GetCommitsAsync(projectId, limit: 1000, offset: 0);
-            if (commits == null || commits.Count == 0)
-                return null;
-
-            var rootCommit = commits.Find(c => string.IsNullOrWhiteSpace(c.ParentCommit));
-            return rootCommit ?? commits[commits.Count - 1];
+            return await GetAsync<Commit>($"/projects/{projectId}/commits/root");
         }
 
         public async Task<Commit> GetBaseModelCommitAsync(string projectId)
         {
-            var commits = await GetCommitsAsync(projectId, limit: 1000, offset: 0);
-            if (commits == null || commits.Count == 0)
-                return null;
-
-            commits.Reverse();
-            var baseCommit = commits.Find(c => c.ElementCount > 0);
-            if (baseCommit != null)
-                return baseCommit;
-
-            return commits[0];
+            return await GetProjectRootCommitAsync(projectId);
         }
 
         public async Task<ElementSnapshot> GetSnapshotAsync(string projectId, string commitId)
@@ -261,6 +251,87 @@ namespace RevitVersionControl.Services
         {
             string encodedModelId = Uri.EscapeDataString(modelId ?? string.Empty);
             return await GetAsync<BaseFileStatus>($"/projects/{projectId}/base-file/status?modelId={encodedModelId}");
+        }
+
+        public async Task<PayloadStatus> GetPayloadStatusAsync(string projectId, string contentHash)
+        {
+            string encodedHash = Uri.EscapeDataString(contentHash ?? string.Empty);
+            return await GetAsync<PayloadStatus>($"/projects/{projectId}/payloads/status?contentHash={encodedHash}");
+        }
+
+        public async Task<PayloadRef> UploadPayloadAsync(
+            string projectId,
+            string contentHash,
+            string filePath,
+            IEnumerable<string> categories,
+            IEnumerable<string> markers)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                {
+                    LastError = "Payload file path is invalid or missing.";
+                    return null;
+                }
+
+                using (var form = new MultipartFormDataContent())
+                using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var fileContent = new StreamContent(fileStream))
+                {
+                    fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    form.Add(new StringContent(contentHash ?? string.Empty), "contentHash");
+                    form.Add(new StringContent(JsonConvert.SerializeObject(categories ?? Array.Empty<string>())), "categoriesJson");
+                    form.Add(new StringContent(JsonConvert.SerializeObject(markers ?? Array.Empty<string>())), "markersJson");
+                    form.Add(fileContent, "file", Path.GetFileName(filePath));
+
+                    var response = await _httpClient.PostAsync($"{_baseUrl}/projects/{projectId}/payloads", form);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        LastError = $"HTTP {(int)response.StatusCode}: {responseContent}";
+                        return null;
+                    }
+
+                    LastError = null;
+                    return JsonConvert.DeserializeObject<PayloadRef>(responseContent);
+                }
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+                Console.WriteLine($"Payload upload failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task<bool> DownloadPayloadAsync(string projectId, string payloadId, string savePath)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync($"{_baseUrl}/projects/{projectId}/payloads/{Uri.EscapeDataString(payloadId ?? string.Empty)}");
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    LastError = $"HTTP {(int)response.StatusCode}: {errorContent}";
+                    return false;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(savePath) ?? string.Empty);
+                using (var stream = await response.Content.ReadAsStreamAsync())
+                using (var fileStream = new FileStream(savePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    await stream.CopyToAsync(fileStream);
+                }
+
+                LastError = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+                Console.WriteLine($"Payload download failed: {ex.Message}");
+                return false;
+            }
         }
 
         public async Task<bool> UploadBaseFileAsync(string projectId, string modelId, string filePath)
@@ -521,6 +592,12 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("elementCount")]
         public int ElementCount { get; set; }
+
+        [JsonProperty("payloadRefs")]
+        public List<PayloadRef> PayloadRefs { get; set; }
+
+        [JsonProperty("checkpointSnapshot")]
+        public ElementSnapshot CheckpointSnapshot { get; set; }
     }
 
     public class BaseFileStatus
@@ -599,6 +676,33 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("elementName")]
         public string ElementName { get; set; }
+    }
+
+    public class PayloadRef
+    {
+        [JsonProperty("payloadId")]
+        public string PayloadId { get; set; }
+
+        [JsonProperty("storageUrl")]
+        public string StorageUrl { get; set; }
+
+        [JsonProperty("contentHash")]
+        public string ContentHash { get; set; }
+
+        [JsonProperty("categories")]
+        public List<string> Categories { get; set; }
+
+        [JsonProperty("markers")]
+        public List<string> Markers { get; set; }
+    }
+
+    public class PayloadStatus
+    {
+        [JsonProperty("exists")]
+        public bool Exists { get; set; }
+
+        [JsonProperty("payload")]
+        public PayloadRef Payload { get; set; }
     }
 
     public class PullResult

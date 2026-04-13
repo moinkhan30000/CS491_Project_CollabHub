@@ -13,15 +13,20 @@ namespace RevitVersionControl.UI
         public string ModelPath { get; }
 
         private readonly ApiClient _apiClient = ApiClient.Instance;
+        private readonly bool _hasUnsavedChanges;
         private DocumentSyncStatus _syncStatus;
 
-        public PublishDialog(string modelPath)
+        public PublishDialog(string modelPath, bool hasUnsavedChanges)
         {
             InitializeComponent();
             ModelPath = modelPath;
-            _syncStatus = DocumentSyncStateService.GetStatus(modelPath, hasUnsavedChanges: false);
+            _hasUnsavedChanges = hasUnsavedChanges;
+            _syncStatus = DocumentSyncStateService.GetStatus(modelPath, hasUnsavedChanges);
             Loaded += PublishDialog_Loaded;
             ProjectComboBox.SelectionChanged += ProjectComboBox_SelectionChanged;
+            SaveRequirementNoteText.Text = hasUnsavedChanges
+                ? "Unsaved standard edits can publish. New stairs/railings require saving first."
+                : "Standard edits can publish now. New stairs/railings still require a saved file.";
         }
 
         private async void PublishDialog_Loaded(object sender, RoutedEventArgs e)
@@ -73,7 +78,7 @@ namespace RevitVersionControl.UI
             BaseFileStatusText.Text = "Base file: checking...";
             try
             {
-                _syncStatus = DocumentSyncStateService.GetStatusForProject(ModelPath, projectId, hasUnsavedChanges: false);
+                _syncStatus = DocumentSyncStateService.GetStatusForProject(ModelPath, projectId, _hasUnsavedChanges);
                 TrackedVersionStatusText.Text = _syncStatus.Summary;
 
                 if (string.IsNullOrWhiteSpace(ModelPath))

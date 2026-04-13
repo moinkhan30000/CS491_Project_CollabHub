@@ -24,6 +24,13 @@ namespace RevitVersionControl.Services
         public DateTime LastUpdatedUtc { get; set; }
     }
 
+    public class AcceptedDocumentHint
+    {
+        public string DocumentPath { get; set; }
+        public string ProjectId { get; set; }
+        public DateTime AcceptedAtUtc { get; set; }
+    }
+
     public class DocumentSyncStatus
     {
         public DocumentSyncState State { get; set; }
@@ -68,8 +75,9 @@ namespace RevitVersionControl.Services
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "RevitVersionControl");
 
-        private static readonly string StateFilePath = Path.Combine(BaseDirectory, "document-sync-state.json");
-        private static readonly string ProjectHintFilePath = Path.Combine(BaseDirectory, "project-sync-hints.json");
+        private static readonly string LegacyStateFilePath = Path.Combine(BaseDirectory, "document-sync-state.json");
+        private static readonly string LegacyProjectHintFilePath = Path.Combine(BaseDirectory, "project-sync-hints.json");
+        private static readonly string LegacyAcceptedHintsFilePath = Path.Combine(BaseDirectory, "accepted-documents.json");
 
         public static DocumentSyncState GetState(string documentPath)
         {
@@ -191,6 +199,47 @@ namespace RevitVersionControl.Services
             SaveProjectHint(documentPath, projectId, modelId, currentCommitId);
         }
 
+        public static void SaveAcceptedDocumentHint(string documentPath, string projectId)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath) || string.IsNullOrWhiteSpace(projectId))
+                return;
+
+            try
+            {
+                var hints = LoadAcceptedDocumentHints();
+                hints[NormalizePath(documentPath)] = new AcceptedDocumentHint
+                {
+                    DocumentPath = documentPath,
+                    ProjectId = projectId,
+                    AcceptedAtUtc = DateTime.UtcNow,
+                };
+                PersistAcceptedDocumentHints(hints);
+            }
+            catch
+            {
+                // Ignore local accepted-hint persistence failures.
+            }
+        }
+
+        public static bool WasAcceptedDocumentForProject(string documentPath, string projectId)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath) || string.IsNullOrWhiteSpace(projectId))
+                return false;
+
+            try
+            {
+                var hints = LoadAcceptedDocumentHints();
+                if (!hints.TryGetValue(NormalizePath(documentPath), out var hint) || hint == null)
+                    return false;
+
+                return string.Equals(hint.ProjectId, projectId, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool HasSavedChangesSinceSync(string documentPath, DocumentSyncState state)
         {
             if (state == null || !state.LastSyncedFileWriteUtc.HasValue)
@@ -207,10 +256,15 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                if (!File.Exists(StateFilePath))
-                    return new Dictionary<string, DocumentSyncState>(StringComparer.OrdinalIgnoreCase);
+                string stateFilePath = GetStateFilePath();
+                if (!File.Exists(stateFilePath))
+                {
+                    stateFilePath = LegacyStateFilePath;
+                    if (!File.Exists(stateFilePath))
+                        return new Dictionary<string, DocumentSyncState>(StringComparer.OrdinalIgnoreCase);
+                }
 
-                string json = File.ReadAllText(StateFilePath);
+                string json = File.ReadAllText(stateFilePath);
                 var store = JsonConvert.DeserializeObject<Dictionary<string, DocumentSyncState>>(json);
                 return store ?? new Dictionary<string, DocumentSyncState>(StringComparer.OrdinalIgnoreCase);
             }
@@ -255,10 +309,15 @@ namespace RevitVersionControl.Services
         {
             try
             {
-                if (!File.Exists(ProjectHintFilePath))
-                    return new Dictionary<string, ProjectSyncHint>(StringComparer.OrdinalIgnoreCase);
+                string projectHintFilePath = GetProjectHintFilePath();
+                if (!File.Exists(projectHintFilePath))
+                {
+                    projectHintFilePath = LegacyProjectHintFilePath;
+                    if (!File.Exists(projectHintFilePath))
+                        return new Dictionary<string, ProjectSyncHint>(StringComparer.OrdinalIgnoreCase);
+                }
 
-                string json = File.ReadAllText(ProjectHintFilePath);
+                string json = File.ReadAllText(projectHintFilePath);
                 var hints = JsonConvert.DeserializeObject<Dictionary<string, ProjectSyncHint>>(json);
                 return hints ?? new Dictionary<string, ProjectSyncHint>(StringComparer.OrdinalIgnoreCase);
             }
@@ -274,7 +333,7 @@ namespace RevitVersionControl.Services
             {
                 Directory.CreateDirectory(BaseDirectory);
                 string json = JsonConvert.SerializeObject(hints, Formatting.Indented);
-                File.WriteAllText(ProjectHintFilePath, json);
+                File.WriteAllText(GetProjectHintFilePath(), json);
             }
             catch
             {
@@ -288,11 +347,47 @@ namespace RevitVersionControl.Services
             {
                 Directory.CreateDirectory(BaseDirectory);
                 string json = JsonConvert.SerializeObject(store, Formatting.Indented);
-                File.WriteAllText(StateFilePath, json);
+                File.WriteAllText(GetStateFilePath(), json);
             }
             catch
             {
                 // Ignore local state persistence failures.
+            }
+        }
+
+        private static Dictionary<string, AcceptedDocumentHint> LoadAcceptedDocumentHints()
+        {
+            try
+            {
+                string acceptedHintsFilePath = GetAcceptedHintsFilePath();
+                if (!File.Exists(acceptedHintsFilePath))
+                {
+                    acceptedHintsFilePath = LegacyAcceptedHintsFilePath;
+                    if (!File.Exists(acceptedHintsFilePath))
+                        return new Dictionary<string, AcceptedDocumentHint>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                string json = File.ReadAllText(acceptedHintsFilePath);
+                var hints = JsonConvert.DeserializeObject<Dictionary<string, AcceptedDocumentHint>>(json);
+                return hints ?? new Dictionary<string, AcceptedDocumentHint>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return new Dictionary<string, AcceptedDocumentHint>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private static void PersistAcceptedDocumentHints(Dictionary<string, AcceptedDocumentHint> hints)
+        {
+            try
+            {
+                Directory.CreateDirectory(BaseDirectory);
+                string json = JsonConvert.SerializeObject(hints, Formatting.Indented);
+                File.WriteAllText(GetAcceptedHintsFilePath(), json);
+            }
+            catch
+            {
+                // Ignore local accepted-hint persistence failures.
             }
         }
 
@@ -323,6 +418,34 @@ namespace RevitVersionControl.Services
             {
                 return (documentPath ?? string.Empty).Trim().ToLowerInvariant();
             }
+        }
+
+        private static string GetStateFilePath()
+        {
+            return Path.Combine(BaseDirectory, $"document-sync-state.{GetCurrentUserScope()}.json");
+        }
+
+        private static string GetProjectHintFilePath()
+        {
+            return Path.Combine(BaseDirectory, $"project-sync-hints.{GetCurrentUserScope()}.json");
+        }
+
+        private static string GetAcceptedHintsFilePath()
+        {
+            return Path.Combine(BaseDirectory, $"accepted-documents.{GetCurrentUserScope()}.json");
+        }
+
+        private static string GetCurrentUserScope()
+        {
+            string email = ApiClient.Instance.CurrentUserEmail;
+            if (string.IsNullOrWhiteSpace(email))
+                return "anonymous";
+
+            foreach (char invalidChar in Path.GetInvalidFileNameChars())
+                email = email.Replace(invalidChar, '_');
+
+            email = email.Trim().ToLowerInvariant();
+            return string.IsNullOrWhiteSpace(email) ? "anonymous" : email;
         }
     }
 }

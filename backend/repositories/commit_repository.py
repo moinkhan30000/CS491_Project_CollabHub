@@ -134,6 +134,27 @@ class CommitRepository:
             )
             return session.exec(statement).first()
 
+    def get_root_commit(
+        self, project_id: str, model_id: Optional[str] = None
+    ) -> Optional[Commit]:
+        with Session(engine) as session:
+            statement = select(Commit).where(Commit.projectId == project_id)
+            if model_id:
+                statement = statement.where(Commit.modelId == model_id)
+
+            root_statement = (
+                statement
+                .where(Commit.parentCommit == None)
+                .order_by(Commit.timestamp.asc())
+                .limit(1)
+            )
+            root_commit = session.exec(root_statement).first()
+            if root_commit is not None:
+                return root_commit
+
+            fallback_statement = statement.order_by(Commit.timestamp.asc()).limit(1)
+            return session.exec(fallback_statement).first()
+
     def list_commits(
         self, project_id: str, limit: int = 50, offset: int = 0
     ) -> List[Commit]:
