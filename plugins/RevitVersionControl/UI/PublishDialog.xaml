@@ -22,7 +22,7 @@
                        Text="Current synced version: unknown"/>
             <TextBlock Name="SaveRequirementNoteText" Margin="0,8,0,0" Foreground="#8A6D3B"
                        TextWrapping="Wrap"
-                       Text="Unsaved standard edits can publish. New stairs/railings require saving first."/>
+                       Text="Unsaved standard edits can publish. New payload-backed additions require saving first."/>
         </StackPanel>
 
         <!-- Commit Message -->

@@ -181,7 +181,7 @@ def _build_summary(commit, user_id: str, user_repo, commit_data=None, author_nam
 @router.get("/{project_id}/commits", response_model=dict)
 async def list_commits(
     project_id: str,
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
 ):

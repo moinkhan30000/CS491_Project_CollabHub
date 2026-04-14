@@ -19,7 +19,6 @@ namespace RevitVersionControl.Commands
             {
                 if (ApiClient.Instance.IsLoggedIn)
                 {
-                    // Logout flow
                     ApiClient.Instance.Logout();
                     Application.SetLoggedInState(false);
                     HistoryPaneProvider.Instance?.Clear();
@@ -28,11 +27,9 @@ namespace RevitVersionControl.Commands
                 }
                 else
                 {
-                    // Login flow
                     var loginDialog = new LoginDialog();
                     if (loginDialog.ShowDialog() == true)
                     {
-                        // Dialog sets result true only if login/register succeeded
                         Application.SetLoggedInState(true);
                         HistoryPaneProvider.Instance?.ReloadProjects();
                         TaskDialog.Show("Success", "Logged in successfully!");
@@ -64,7 +61,6 @@ namespace RevitVersionControl.Commands
                 var registerDialog = new RegisterDialog();
                 if (registerDialog.ShowDialog() == true)
                 {
-                    // Register dialog handles auto-login on success
                     Application.SetLoggedInState(true);
                     HistoryPaneProvider.Instance?.ReloadProjects();
                     TaskDialog.Show("Success", "Account created and logged in!");
@@ -96,7 +92,6 @@ namespace RevitVersionControl.Commands
                 Document doc = uiApp.ActiveUIDocument.Document;
                 bool hasUnsavedChanges = doc.IsModified;
 
-                // Show publish dialog
                 var publishDialog = new PublishDialog(doc.PathName, hasUnsavedChanges);
                 var result = publishDialog.ShowDialog();
 
@@ -182,10 +177,8 @@ namespace RevitVersionControl.Commands
                 }
                 catch
                 {
-                    // Repo GUID assignment is best-effort; existing UniqueId fallback remains available.
                 }
 
-                // Extract elements
                 var extractor = new ElementExtractor(doc);
                 var extractionOptions = new ExtractionOptions
                 {
@@ -196,7 +189,6 @@ namespace RevitVersionControl.Commands
                 };
                 var elementData = extractor.ExtractAllElements(extractionOptions);
 
-                // Create snapshot
                 var extractedElements = elementData.Cast<object>().ToList();
                 var snapshot = new ElementSnapshot
                 {
@@ -309,9 +301,13 @@ namespace RevitVersionControl.Commands
                         modeText += "\n\nPackage publish was unavailable, so the add-in fell back to a full snapshot.";
                     }
 
+                    string shortCommitId = commit.CommitId?.Length > 8
+                        ? commit.CommitId.Substring(0, 8)
+                        : commit.CommitId;
+
                     TaskDialog.Show("Success", 
                         $"{modeText}\n\n" +
-                        $"Commit ID: {commit.CommitId}\n" +
+                        $"Commit: {shortCommitId}\n" +
                         $"Elements: {elementData.Count}");
                     return Result.Succeeded;
                 }
@@ -350,7 +346,6 @@ namespace RevitVersionControl.Commands
 
             try
             {
-                // Show history pane
                 var paneId = new DockablePaneId(new Guid("12345678-1234-1234-1234-123456789012"));
                 DockablePane pane = commandData.Application.GetDockablePane(paneId);
                 
@@ -398,7 +393,6 @@ namespace RevitVersionControl.Commands
                                         ?? DocumentSyncStateService.GetStateForProject(doc.PathName, projectId)?.ModelId
                                         ?? doc.PathName;
 
-                // Use wait cursor instead of blocking TaskDialog
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
 
                 PullResult pullResult = null;
@@ -427,13 +421,17 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Show changes in diff/merge pane
                 var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
                 DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
 
                 if (diffPane != null)
                 {
-                    DiffMergePaneProvider.Instance?.LoadPullResult(pullResult, projectId);
+                    DiffMergePaneProvider.Instance?.LoadPullResult(
+                        pullResult,
+                        projectId,
+                        currentCommit,
+                        targetCommit,
+                        trackedModelId);
                     diffPane.Show();
                 }
 
@@ -462,7 +460,6 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Use wait cursor for apply as well
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
 
                 ElementApplier.ApplyResult applyResponse = null;
@@ -511,7 +508,6 @@ namespace RevitVersionControl.Commands
                     }
                     catch
                     {
-                        // Ignore local cache refresh failures after a successful pull.
                     }
 
                     bool hasIssues = applyResponse.Errors.Count > 0
@@ -520,39 +516,7 @@ namespace RevitVersionControl.Commands
                                      || applyResponse.IgnoredAutogenerated.Count > 0;
 
                     string title = hasIssues ? "Completed with issues" : "Success";
-                    string resultMessage = $"Remote changes processed.\n\n" +
-                                          $"Applied: {applyResponse.AppliedCount}\n" +
-                                          $"Skipped: {applyResponse.SkippedCount}\n" +
-                                          $"Ignored autogenerated: {applyResponse.IgnoredAutogenerated.Count}\n" +
-                                          $"Unsupported/manual: {applyResponse.UnsupportedElements.Count}\n" +
-                                          $"Warnings: {applyResponse.WarningCount}\n" +
-                                          $"Failures: {applyResponse.ErrorCount}";
-
-                    if (applyResponse.UnsupportedElements.Count > 0)
-                    {
-                        resultMessage += $"\n\nUnsupported/manual review:\n";
-                        resultMessage += string.Join("\n", applyResponse.UnsupportedElements.Take(3));
-                        if (applyResponse.UnsupportedElements.Count > 3)
-                            resultMessage += $"\n... and {applyResponse.UnsupportedElements.Count - 3} more";
-                    }
-
-                    if (applyResponse.Warnings.Count > 0)
-                    {
-                        resultMessage += $"\n\nWarnings:\n";
-                        resultMessage += string.Join("\n", applyResponse.Warnings.Take(3));
-                        if (applyResponse.Warnings.Count > 3)
-                            resultMessage += $"\n... and {applyResponse.Warnings.Count - 3} more";
-                    }
-
-                    if (applyResponse.Errors.Count > 0)
-                    {
-                        resultMessage += $"\n\nFailures:\n";
-                        resultMessage += string.Join("\n", applyResponse.Errors.Take(3));
-                        if (applyResponse.Errors.Count > 3)
-                            resultMessage += $"\n... and {applyResponse.Errors.Count - 3} more";
-                    }
-
-                    TaskDialog.Show(title, resultMessage);
+                    TaskDialog.Show(title, ApplyResultMessageBuilder.Build(applyResponse));
 
                     if (applyResponse.Errors.Count > 0
                         || applyResponse.Warnings.Count > 0
@@ -560,6 +524,8 @@ namespace RevitVersionControl.Commands
                         || applyResponse.IgnoredAutogenerated.Count > 0)
                     {
                         System.Diagnostics.Debug.WriteLine("\n=== APPLY CHANGES DETAILED LOG ===");
+                        foreach (var satisfied in applyResponse.PayloadSatisfiedByBundle)
+                            System.Diagnostics.Debug.WriteLine("[PAYLOAD-SATISFIED] " + satisfied);
                         foreach (var ignored in applyResponse.IgnoredAutogenerated)
                             System.Diagnostics.Debug.WriteLine("[IGNORED] " + ignored);
                         foreach (var unsupported in applyResponse.UnsupportedElements)
@@ -627,7 +593,6 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Use wait cursor instead of blocking TaskDialog
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
 
                 DiffResult diffResult = null;
@@ -659,7 +624,6 @@ namespace RevitVersionControl.Commands
                     return Result.Succeeded;
                 }
 
-                // Load result into pane and show it
                 var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
                 DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
 
@@ -692,8 +656,6 @@ namespace RevitVersionControl.Commands
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            // Settings might be allowed even if logged out? Or maybe only logged in.
-            // Let's restrict it for safety.
             if (!ApiClient.Instance.IsLoggedIn)
                 return Result.Cancelled;
 

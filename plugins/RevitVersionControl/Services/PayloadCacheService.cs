@@ -59,6 +59,20 @@ namespace RevitVersionControl.Services
             }
         }
 
+        public static void TryDeleteFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return;
+
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch
+            {
+            }
+        }
+
         private static string GetPayloadDirectory(string projectId)
         {
             string directory = Path.Combine(PayloadRoot, SanitizeSegment(projectId));

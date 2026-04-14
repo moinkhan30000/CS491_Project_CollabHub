@@ -11,18 +11,11 @@ using Newtonsoft.Json.Linq;
 
 namespace RevitVersionControl.Services
 {
-    /// <summary>
-    /// Result of a single element creation attempt.
-    /// </summary>
     public class CreationResult
     {
-        /// <summary>The created element, or null if creation failed or is unsupported.</summary>
         public Element Element { get; set; }
-
-        /// <summary>True when the category/type is known to be unsupported by the Revit API.</summary>
         public bool IsUnsupported { get; set; }
-
-        /// <summary>Human-readable reason for failure or unsupported status.</summary>
+        public bool IsSatisfiedByBundle { get; set; }
         public string Reason { get; set; }
 
         public static CreationResult Success(Element element) =>
@@ -31,25 +24,22 @@ namespace RevitVersionControl.Services
         public static CreationResult Unsupported(string reason) =>
             new CreationResult { IsUnsupported = true, Reason = reason };
 
+        public static CreationResult SatisfiedByBundle(string reason) =>
+            new CreationResult { IsSatisfiedByBundle = true, Reason = reason };
+
         public static CreationResult Failed(string reason) =>
             new CreationResult { Reason = reason };
     }
 
-    /// <summary>
-    /// Generic factory for creating Revit elements from serialised change data.
-    /// All category-specific creation logic lives here; ElementApplier calls
-    /// Create() and never needs to know which Revit API method was used.
-    /// </summary>
     public class ElementCreator
     {
-        // Categories the Revit API cannot create programmatically.
-        // Elements in these categories are reported to the user rather than silently skipped.
         private static readonly HashSet<string> _unsupportedCategories = new HashSet<string>(
             StringComparer.OrdinalIgnoreCase)
         {
             "Stairs",
             "Railings",
             "Railing",
+            "Model Text",
             "Curtain Panels",
             "Curtain Wall Mullions",
             "Topography",
@@ -67,14 +57,6 @@ namespace RevitVersionControl.Services
             _document = document;
         }
 
-        // -----------------------------------------------------------------------
-        // Public entry point
-        // -----------------------------------------------------------------------
-
-        /// <summary>
-        /// Create a Revit element from the newData payload of an "added" change.
-        /// Must be called inside an open Transaction.
-        /// </summary>
         public CreationResult Create(JObject newData)
         {
             if (newData == null)
@@ -85,7 +67,6 @@ namespace RevitVersionControl.Services
             string typeName   = newData["typeName"]?.ToString()    ?? string.Empty;
             var    location   = newData["location"]  as JObject;
 
-            // Bail out immediately for known-unsupported categories
             if (_unsupportedCategories.Contains(category))
                 return CreationResult.Unsupported(
                     $"Category '{category}' cannot be created programmatically via the Revit API. " +
@@ -115,10 +96,6 @@ namespace RevitVersionControl.Services
                     $"Exception creating '{category}' '{familyName}:{typeName}': {ex.Message}");
             }
         }
-
-        // -----------------------------------------------------------------------
-        // Structural / Architectural
-        // -----------------------------------------------------------------------
 
         private CreationResult CreateWall(JObject newData, JObject location)
         {
@@ -202,7 +179,7 @@ namespace RevitVersionControl.Services
 
             double x1 = min["x"]?.Value<double>() ?? 0;
             double y1 = min["y"]?.Value<double>() ?? 0;
-            double z  = max["z"]?.Value<double>() ?? 0; // Use top Z for flat roof elevation
+            double z  = max["z"]?.Value<double>() ?? 0;
             double x2 = max["x"]?.Value<double>() ?? 0;
             double y2 = max["y"]?.Value<double>() ?? 0;
 
@@ -289,7 +266,6 @@ namespace RevitVersionControl.Services
 
             XYZ point = ReadLocationPoint(location);
 
-            // Try to find the host element by the stored hostId
             string hostUniqueId = newData["hostId"]?.ToString();
             Element host = !string.IsNullOrEmpty(hostUniqueId)
                 ? _document.GetElement(hostUniqueId)
@@ -297,13 +273,11 @@ namespace RevitVersionControl.Services
 
             if (host != null)
             {
-                // Hosted placement — correct for doors, windows, wall-hosted fixtures
                 var instance = _document.Create.NewFamilyInstance(
                     point, symbol, host, StructuralType.NonStructural);
                 return CreationResult.Success(instance);
             }
 
-            // No host found — fall back to level-based placement and warn
             Level level = GetNearestLevel(point.Z) ??
                 new FilteredElementCollector(_document)
                     .OfClass(typeof(Level))
@@ -317,11 +291,10 @@ namespace RevitVersionControl.Services
             var fallback = _document.Create.NewFamilyInstance(
                 point, symbol, level, StructuralType.NonStructural);
 
-            // Return success but surface a warning through the Reason field
             return new CreationResult
             {
                 Element  = fallback,
-                Reason   = $"Warning: '{familyName}' placed without host — host '{hostUniqueId}' not found. " +
+                Reason   = $"Warning: '{familyName}' placed without host - host '{hostUniqueId}' not found. " +
                             "Element may need to be re-hosted manually."
             };
         }
@@ -344,10 +317,6 @@ namespace RevitVersionControl.Services
             var room = _document.Create.NewRoom(level, uvPoint);
             return CreationResult.Success(room);
         }
-
-        // -----------------------------------------------------------------------
-        // MEP
-        // -----------------------------------------------------------------------
 
         private CreationResult CreateDuct(string typeName, JObject location)
         {
@@ -451,10 +420,6 @@ namespace RevitVersionControl.Services
             return CreationResult.Success(conduit);
         }
 
-        // -----------------------------------------------------------------------
-        // Generic family instance fallback
-        // -----------------------------------------------------------------------
-
         private CreationResult CreateGenericFamilyInstance(
             string familyName, string typeName, JObject location)
         {
@@ -482,15 +447,6 @@ namespace RevitVersionControl.Services
             return CreationResult.Success(instance);
         }
 
-        // -----------------------------------------------------------------------
-        // Pre-flight helper — call before the transaction to warn the user
-        // -----------------------------------------------------------------------
-
-        /// <summary>
-        /// Returns family names referenced by "added" changes that are not
-        /// loaded in the current document. Call this before ApplyChanges to
-        /// surface missing family warnings proactively.
-        /// </summary>
         public List<string> GetMissingFamilies(IEnumerable<Change> changes)
         {
             var loaded = new HashSet<string>(
@@ -511,7 +467,9 @@ namespace RevitVersionControl.Services
                 string family  = data["familyName"]?.ToString();
                 string cat     = data["category"]?.ToString() ?? string.Empty;
 
-                // Walls / Floors / Roofs use system types, not loadable families
+                if (SyncCategoryRules.ShouldUsePayloadForAddedElement(cat))
+                    continue;
+
                 if (string.IsNullOrEmpty(family)
                     || cat == "Walls" || cat == "Floors" || cat == "Roofs"
                     || cat == "Rooms")
@@ -523,10 +481,6 @@ namespace RevitVersionControl.Services
 
             return missing;
         }
-
-        // -----------------------------------------------------------------------
-        // Private helpers
-        // -----------------------------------------------------------------------
 
         private T FindByName<T>(string name) where T : Element
         {

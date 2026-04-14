@@ -18,7 +18,7 @@ namespace RevitVersionControl.Services
     internal static class PayloadSupportService
     {
         internal const string SaveRequiredMessage =
-            "This publish includes new stairs/railings that require a saved donor model. Save the Revit file, then publish again.";
+            "This publish includes new payload-backed additions that require a saved donor model. Save the Revit file, then publish again.";
 
         public static PayloadPreparationResult PreparePayloadBackedChanges(
             Document document,
@@ -57,7 +57,17 @@ namespace RevitVersionControl.Services
 
             try
             {
-                string donorPath = document.PathName;
+                var donorBuild = PayloadDonorBuilder.Build(document, projectId, payloadChanges);
+                string donorPath = donorBuild?.DonorPath;
+                bool deleteDonorAfterUse = donorBuild?.IsTemporary == true
+                                           && !string.Equals(donorPath, document.PathName, StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(donorPath) || !File.Exists(donorPath))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = "Failed to prepare donor payload source.";
+                    return result;
+                }
+
                 string contentHash = PayloadCacheService.ComputeContentHash(donorPath);
                 var categories = payloadChanges
                     .Select(change => change.Category)
@@ -79,9 +89,21 @@ namespace RevitVersionControl.Services
 
                 if (payloadRef == null)
                 {
-                    var uploadTask = Task.Run(async () =>
-                        await ApiClient.Instance.UploadPayloadAsync(projectId, contentHash, donorPath, categories, markers));
-                    payloadRef = uploadTask.GetAwaiter().GetResult();
+                    try
+                    {
+                        var uploadTask = Task.Run(async () =>
+                            await ApiClient.Instance.UploadPayloadAsync(projectId, contentHash, donorPath, categories, markers));
+                        payloadRef = uploadTask.GetAwaiter().GetResult();
+                    }
+                    finally
+                    {
+                        if (deleteDonorAfterUse)
+                            PayloadCacheService.TryDeleteFile(donorPath);
+                    }
+                }
+                else if (deleteDonorAfterUse)
+                {
+                    PayloadCacheService.TryDeleteFile(donorPath);
                 }
 
                 if (payloadRef == null)
@@ -119,20 +141,21 @@ namespace RevitVersionControl.Services
             if (document == null)
                 return false;
 
-            var baselineKeys = BuildPayloadTrackingKeys(baselineSnapshot);
+            if (baselineSnapshot == null)
+                return false;
+
+            var baselineKeys = BuildTrackingKeys(baselineSnapshot);
             var collector = new FilteredElementCollector(document)
                 .WhereElementIsNotElementType();
 
             foreach (Element element in collector)
             {
-                if (!SyncCategoryRules.IsPayloadBackedCategory(element?.Category?.Name))
+                string category = element?.Category?.Name;
+                if (!SyncCategoryRules.ShouldUsePayloadForAddedElement(category))
                     continue;
 
                 string trackingKey = BuildTrackingKey(RepoGuidService.GetRepoGuid(element), element?.UniqueId);
-                if (string.IsNullOrWhiteSpace(trackingKey))
-                    return true;
-
-                if (!baselineKeys.Contains(trackingKey))
+                if (!string.IsNullOrWhiteSpace(trackingKey) && !baselineKeys.Contains(trackingKey))
                     return true;
             }
 
@@ -233,17 +256,24 @@ namespace RevitVersionControl.Services
 
         private static bool IsPayloadBackedAddition(Change change)
         {
-            return change != null
-                   && string.Equals(change.ChangeType, "added", StringComparison.OrdinalIgnoreCase)
-                   && SyncCategoryRules.IsPayloadBackedCategory(change.Category);
+            if (change == null || !string.Equals(change.ChangeType, "added", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string category = change.Category;
+            if (string.IsNullOrWhiteSpace(category) && change.NewData != null)
+                category = change.NewData.TryGetValue("category", out object categoryValue)
+                    ? categoryValue?.ToString()
+                    : null;
+
+            return SyncCategoryRules.ShouldUsePayloadForAddedElement(category);
         }
 
         private static string GetPayloadMarker(Change change)
         {
-            return change?.RepoGuid ?? change?.ElementId;
+            return change?.ElementId ?? change?.RepoGuid;
         }
 
-        private static HashSet<string> BuildPayloadTrackingKeys(ElementSnapshot snapshot)
+        private static HashSet<string> BuildTrackingKeys(ElementSnapshot snapshot)
         {
             var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (snapshot?.Elements == null)
@@ -254,9 +284,6 @@ namespace RevitVersionControl.Services
                 try
                 {
                     JObject element = rawElement as JObject ?? JObject.FromObject(rawElement);
-                    if (!SyncCategoryRules.IsPayloadBackedCategory(element["category"]?.ToString()))
-                        continue;
-
                     string trackingKey = BuildTrackingKey(
                         element["repoGuid"]?.ToString(),
                         element["id"]?.ToString());

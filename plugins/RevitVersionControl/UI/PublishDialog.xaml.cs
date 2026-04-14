@@ -25,8 +25,8 @@ namespace RevitVersionControl.UI
             Loaded += PublishDialog_Loaded;
             ProjectComboBox.SelectionChanged += ProjectComboBox_SelectionChanged;
             SaveRequirementNoteText.Text = hasUnsavedChanges
-                ? "Unsaved standard edits can publish. New stairs/railings require saving first."
-                : "Standard edits can publish now. New stairs/railings still require a saved file.";
+                ? "Unsaved standard edits can publish. New payload-backed additions require saving first."
+                : "Standard edits can publish now. New payload-backed additions still require a saved file.";
         }
 
         private async void PublishDialog_Loaded(object sender, RoutedEventArgs e)

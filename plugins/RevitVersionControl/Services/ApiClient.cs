@@ -9,9 +9,6 @@ using System.IO;
 
 namespace RevitVersionControl.Services
 {
-    /// <summary>
-    /// API client for communicating with backend server
-    /// </summary>
     public class ApiClient
     {
         private static ApiClient _instance;
@@ -29,7 +26,7 @@ namespace RevitVersionControl.Services
         {
             _baseUrl = baseUrl;
             _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromSeconds(120); // 2 minute timeout for large file uploads
+            _httpClient.Timeout = TimeSpan.FromSeconds(120);
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
         }
 
@@ -39,8 +36,6 @@ namespace RevitVersionControl.Services
             _httpClient.DefaultRequestHeaders.Remove("Authorization");
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
         }
-
-        // ========== Authentication ==========
 
         public async Task<bool> LoginAsync(string email, string password)
         {
@@ -66,7 +61,6 @@ namespace RevitVersionControl.Services
                 password 
             };
             
-            // Backend returns Token object directly on register (auto-login)
             var response = await PostAsync<LoginResponse>("/auth/register", payload);
             
             if (response != null && !string.IsNullOrEmpty(response.AccessToken))
@@ -84,15 +78,7 @@ namespace RevitVersionControl.Services
             _authToken = null;
             CurrentUserEmail = null;
             _httpClient.DefaultRequestHeaders.Remove("Authorization");
-            try 
-            {
-                // Optional: Call backend logout if needed, but JWT is stateless usually
-                // PostAsync<object>("/auth/logout", new { }).Wait(); 
-            }
-            catch { }
         }
-
-        // ========== Projects ==========
 
         public async Task<List<Project>> GetProjectsAsync()
         {

@@ -54,7 +54,7 @@ Title="Changes &amp; Merge">
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <CheckBox Grid.Column="0" IsChecked="True" VerticalAlignment="Center"/>
+                                <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
 
                                 <Border Grid.Column="1" Width="40" Height="20" CornerRadius="3"
                                         Background="{Binding StatusColor}" VerticalAlignment="Center">

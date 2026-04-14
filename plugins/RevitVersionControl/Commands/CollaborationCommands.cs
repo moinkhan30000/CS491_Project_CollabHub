@@ -43,7 +43,6 @@ namespace RevitVersionControl.Commands
                 }
                 catch
                 {
-                    // Repo GUID assignment is best-effort during bootstrap.
                 }
 
                 var extractor = new ElementExtractor(doc);
@@ -65,17 +64,11 @@ namespace RevitVersionControl.Commands
                     Elements = elementData.ConvertAll(e => (object)e)
                 };
 
-                // Use a simple task dialog to inform user? No, that blocks.
-                // Just use a WaitCursor.
-                // Set wait cursor manually using WPF
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
                 try
                 {
-                    // Run on a background thread to prevent UI Deadlock.
-                    // The UI thread is blocked by Wait(), so the async task MUST NOT try to use it.
                     var task = Task.Run(() => ApiClient.Instance.InitProjectAsync(projectName, filePath, initialSnapshot));
 
-                    // Wait 120 seconds
                     if (task.Wait(TimeSpan.FromSeconds(120)))
                     {
                         var resultProject = task.Result;
@@ -171,13 +164,11 @@ namespace RevitVersionControl.Commands
             var dialog = new InvitationsDialog();
             var dialogResult = dialog.ShowDialog();
             
-            // If user accepted an invitation and chose to open the file
             if (dialogResult == true && !string.IsNullOrEmpty(dialog.DownloadedFilePath))
             {
                 try
                 {
                     string filePath = dialog.DownloadedFilePath;
-                    // Open the document
                     var modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath);
                     var openOptions = new OpenOptions();
 
@@ -258,7 +249,6 @@ namespace RevitVersionControl.Commands
             }
             catch
             {
-                // Ignore local onboarding tracking failures here. Pull/publish can still recover later.
             }
         }
     }

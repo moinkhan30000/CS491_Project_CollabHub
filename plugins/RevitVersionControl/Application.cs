@@ -7,10 +7,6 @@ using RevitVersionControl.Services;
     
 namespace RevitVersionControl
 {
-    /// <summary>
-    /// Main application entry point for Revit add-in
-    /// Registers ribbon UI and commands
-    /// </summary>
     [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
     public class Application : IExternalApplication
@@ -18,7 +14,6 @@ namespace RevitVersionControl
         private const string TabName = "Version Control";   
         private const string PanelName = "Revit VC";
 
-        // Static references to UI elements to control visibility
         public static System.Collections.Generic.List<PushButton> RestrictedButtons { get; private set; } = new System.Collections.Generic.List<PushButton>();
         public static PushButton LoginButton { get; private set; }
         public static PushButton RegisterButton { get; private set; }
@@ -45,23 +40,15 @@ namespace RevitVersionControl
         {
             try
             {
-                // Create ribbon tab
                 try { application.CreateRibbonTab(TabName); } catch { }
 
-                // Create ribbon panel
                 RibbonPanel panel = application.CreateRibbonPanel(TabName, PanelName);
-
-                // Add buttons
-                
-                // Login/Logout Button (Always Visible)
                 LoginButton = AddPushButton(panel, "Login", "Login",
                     typeof(Commands.LoginCommand), "LoginCommand.png", "Login to CollabHub");
 
-                // Register Button (Visible only when logged out)
                 RegisterButton = AddPushButton(panel, "Register", "Register",
                     typeof(Commands.RegisterCommand), "RegisterCommand.png", "Create a new CollabHub account");
 
-                // Restricted Buttons (Initially Hidden)
                 var publishBtn = AddPushButton(panel, "Publish", "Publish\nSnapshot",
                     typeof(Commands.PublishCommand), "PublishCommand.png", "Publish current model snapshot to server");
                 RestrictedButtons.Add(publishBtn);
@@ -86,7 +73,6 @@ namespace RevitVersionControl
 
                 panel.AddSeparator();
 
-                // Collaboration Buttons
                 var initBtn = AddPushButton(panel, "Init", "Initialize\nProject",
                     typeof(Commands.InitProjectCommand), "InitCommand.png", "Initialize version control for this project");
                 RestrictedButtons.Add(initBtn);
@@ -99,15 +85,12 @@ namespace RevitVersionControl
                     typeof(Commands.InvitationsCommand), "InvitationsCommand.png", "Manage your project invitations");
                 RestrictedButtons.Add(invitesBtn);
 
-                // Initialize state
                 SetLoggedInState(false);
 
-                // Register dockable panes (skip if UI classes don't exist)
                 try { RegisterDockablePanes(application); }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"Warning: Dockable panes failed to load: {ex.Message}");
-                    // Continue - dockable panes are optional
                 }
 
                 return Result.Succeeded;
@@ -121,7 +104,6 @@ namespace RevitVersionControl
 
         public Result OnShutdown(UIControlledApplication application)
         {
-            // Cleanup resources
             return Result.Succeeded;
         }
 
@@ -141,9 +123,6 @@ namespace RevitVersionControl
 
         private void RegisterDockablePanes(UIControlledApplication application)
         {
-            // These will only register if the UI classes exist
-            // If they don't, the exception is caught in OnStartup
-            
             try
             {
                 application.RegisterDockablePane(
@@ -167,13 +146,10 @@ namespace RevitVersionControl
 
         private BitmapImage LoadImage(string _imageName)
         {
-            // Load embedded resource image
-            // Implementation would load from resources
             return null;
         }
     }
 
-    // Dockable Pane Providers - Stub implementations with all required methods
     public class HistoryPaneProvider : IDockablePaneProvider
     {
         public static HistoryPaneProvider Instance { get; private set; } = new HistoryPaneProvider();
@@ -208,8 +184,13 @@ namespace RevitVersionControl
             data.InitialState = new DockablePaneState { DockPosition = DockPosition.Right };
         }
 
-        public void LoadPullResult(object result, string projectId = null) =>
-            _diffMergePane?.LoadPullResult(result as PullResult, projectId);
+        public void LoadPullResult(
+            object result,
+            string projectId = null,
+            string currentCommitId = null,
+            string targetCommitId = null,
+            string modelId = null) =>
+            _diffMergePane?.LoadPullResult(result as PullResult, projectId, currentCommitId, targetCommitId, modelId);
         public void LoadDiffResult(object result) => _diffMergePane?.LoadDiffResult(result as DiffResult);
         public void Clear() => _diffMergePane?.Clear();
     }
