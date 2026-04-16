@@ -1,4 +1,4 @@
-﻿"""
+"""
 Snapshots & Commits Router
 """
 
@@ -7,9 +7,10 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends
 from dependencies import get_current_user
 from diff_engine import DiffEngine
 from entities.user_entity import User
-from repositories.commit_repository import CommitRepository, _RESNAPSHOT_INTERVAL
 from repositories.project_repository import ProjectRepository
+from repositories.commit_repository import CommitRepository, _RESNAPSHOT_INTERVAL
 from repositories.user_repository import UserRepository
+from repositories.branch_repository import BranchRepository
 from schemas.commit_schema import CommitCreate, CommitDetail, CommitSummary, CommitPackageCreate
 from services.operation_engine import OperationEngine
 
@@ -17,6 +18,7 @@ router = APIRouter()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
 user_repo = UserRepository()
+branch_repo = BranchRepository()
 diff_engine = DiffEngine()
 operation_engine = OperationEngine()
 
@@ -53,6 +55,10 @@ async def create_snapshot(
             element_count=len(commit_data.snapshot.elements),
             changed_elements=len(commit_data.snapshot.elements),
         )
+        if commit_data.branchName:
+            branch = branch_repo.get_branch(project_id, commit_data.branchName)
+            if branch:
+                branch_repo.update_branch_head(branch.branchId, commit.commitId)
         return _build_summary(commit, user_id, user_repo, commit_data)
 
     parent_snapshot = commit_repo.get_snapshot(parent_commit_id)
@@ -92,6 +98,11 @@ async def create_snapshot(
         element_count=len(commit_data.snapshot.elements),
         changed_elements=len(diff_result.changes),
     )
+
+    if commit_data.branchName:
+        branch = branch_repo.get_branch(project_id, commit_data.branchName)
+        if branch:
+            branch_repo.update_branch_head(branch.branchId, commit.commitId)
 
     return _build_summary(commit, user_id, user_repo, commit_data)
 
@@ -155,6 +166,11 @@ async def create_commit_package(
         element_count=package_data.elementCount,
         changed_elements=len(package_data.changes),
     )
+
+    if package_data.branchName:
+        branch = branch_repo.get_branch(project_id, package_data.branchName)
+        if branch:
+            branch_repo.update_branch_head(branch.branchId, commit.commitId)
 
     return _build_summary(
         commit,

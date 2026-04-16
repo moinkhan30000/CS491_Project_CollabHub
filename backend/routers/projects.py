@@ -11,6 +11,7 @@ from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from repositories.project_member_repository import ProjectMemberRepository
 from repositories.user_repository import UserRepository
+from repositories.branch_repository import BranchRepository
 from services.storage import StorageService
 from dependencies import get_current_user
 from routers.base_files import find_base_file_path, save_base_file
@@ -22,6 +23,7 @@ project_repo = ProjectRepository()
 commit_repo = CommitRepository()
 member_repo = ProjectMemberRepository()
 user_repo = UserRepository()
+branch_repo = BranchRepository()
 storage_service = StorageService()
 
 @router.get("")
@@ -80,6 +82,13 @@ async def init_project(
         snapshot=initial_snapshot,
         element_count=len(initial_snapshot.elements),
         changed_elements=len(initial_snapshot.elements)
+    )
+
+    branch_repo.create_branch(
+        project_id=project.projectId,
+        name="main",
+        user_id=user_id,
+        head_commit_id=initial_commit.commitId
     )
 
     member_repo.add_member(project.projectId, user_id, role="OWNER", status="ACTIVE")

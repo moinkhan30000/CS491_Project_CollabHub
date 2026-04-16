@@ -14,9 +14,11 @@ namespace RevitVersionControl.UI
         public string CurrentCommitId { get; private set; }
         public string ProjectId { get; private set; }
         public string SelectedModelId { get; private set; }
+        public string SelectedBranchName { get; private set; }
 
         private ComboBox ProjectComboBox;
         private ComboBox CurrentCommitComboBox;
+        private ComboBox TargetBranchComboBox;
         private ComboBox TargetCommitComboBox;
         private TextBlock CurrentVersionStatusText;
         private readonly ApiClient _apiClient = ApiClient.Instance;
@@ -36,7 +38,7 @@ namespace RevitVersionControl.UI
         {
             this.Title = "Pull Changes";
             this.Width = 420;
-            this.Height = 320;
+            this.Height = 360;
             this.WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var mainPanel = new StackPanel { Margin = new Thickness(10) };
@@ -57,7 +59,12 @@ namespace RevitVersionControl.UI
             };
             mainPanel.Children.Add(CurrentVersionStatusText);
 
-            mainPanel.Children.Add(new TextBlock { Text = "Target Commit:", Margin = new Thickness(0, 0, 0, 5) });
+            mainPanel.Children.Add(new TextBlock { Text = "Target Branch:", Margin = new Thickness(0, 0, 0, 5) });
+            TargetBranchComboBox = new ComboBox { Margin = new Thickness(0, 0, 0, 15) };
+            TargetBranchComboBox.SelectionChanged += TargetBranchComboBox_SelectionChanged;
+            mainPanel.Children.Add(TargetBranchComboBox);
+
+            mainPanel.Children.Add(new TextBlock { Text = "Target Commit (Manual Override):", Margin = new Thickness(0, 0, 0, 5) });
             TargetCommitComboBox = new ComboBox { Margin = new Thickness(0, 0, 0, 15) };
             mainPanel.Children.Add(TargetCommitComboBox);
 
@@ -127,6 +134,43 @@ namespace RevitVersionControl.UI
             if (ProjectComboBox.SelectedItem is Project project)
             {
                 await LoadCommitsAsync(project.ProjectId);
+                await LoadBranchesAsync(project.ProjectId);
+            }
+        }
+
+        private async Task LoadBranchesAsync(string projectId)
+        {
+            try
+            {
+                TargetBranchComboBox.ItemsSource = null;
+                TargetBranchComboBox.SelectedItem = null;
+                var branches = await _apiClient.GetBranchesAsync(projectId);
+                
+                var branchItems = branches.Select(b => new BranchItem { Name = b.Name, HeadCommitId = b.HeadCommitId }).ToList();
+                TargetBranchComboBox.ItemsSource = branchItems;
+                TargetBranchComboBox.DisplayMemberPath = "Name";
+
+                if (branchItems.Count > 0)
+                {
+                    // Select default branch or current branch
+                    string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
+                    var currentBranch = branchItems.FirstOrDefault(b => b.Name.Equals(trackedBranch, StringComparison.OrdinalIgnoreCase)) ?? branchItems.First();
+                    TargetBranchComboBox.SelectedItem = currentBranch;
+                }
+            }
+            catch { }
+        }
+
+        private void TargetBranchComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (TargetBranchComboBox.SelectedItem is BranchItem branchItem && TargetCommitComboBox.ItemsSource != null)
+            {
+                var commits = (List<CommitItem>)TargetCommitComboBox.ItemsSource;
+                var headCommit = commits.Find(c => c.CommitId == branchItem.HeadCommitId);
+                if (headCommit != null)
+                {
+                    TargetCommitComboBox.SelectedItem = headCommit;
+                }
             }
         }
 
@@ -279,6 +323,16 @@ namespace RevitVersionControl.UI
                 return;
             }
 
+            if (TargetBranchComboBox.SelectedItem is BranchItem currentBranch && !string.IsNullOrWhiteSpace(currentBranch.HeadCommitId))
+            {
+                var branchTarget = commitItems.Find(c => c.CommitId == currentBranch.HeadCommitId);
+                if (branchTarget != null && branchTarget.CommitId != trackedCurrent.CommitId)
+                {
+                    TargetCommitComboBox.SelectedItem = branchTarget;
+                    return;
+                }
+            }
+
             var suggestedTarget = commitItems.Find(c => c.CommitId != trackedCurrent.CommitId);
             TargetCommitComboBox.SelectedItem = suggestedTarget ?? trackedCurrent;
         }
@@ -314,6 +368,11 @@ namespace RevitVersionControl.UI
                 CurrentCommitId = currentItem.CommitId;
             }
 
+            if (TargetBranchComboBox.SelectedItem is BranchItem branchItem)
+            {
+                SelectedBranchName = branchItem.Name;
+            }
+
             if (TargetCommitComboBox.SelectedItem is CommitItem targetItem)
             {
                 SelectedCommitId = targetItem.CommitId;
@@ -342,6 +401,12 @@ namespace RevitVersionControl.UI
             public string CommitId { get; set; }
             public string ModelId { get; set; }
             public string DisplayText { get; set; }
+        }
+
+        private class BranchItem
+        {
+            public string Name { get; set; }
+            public string HeadCommitId { get; set; }
         }
     }
 }

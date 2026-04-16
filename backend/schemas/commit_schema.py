@@ -9,6 +9,7 @@ class CommitCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: Optional[str] = None
+    branchName: Optional[str] = None
     snapshot: ElementSnapshot
 
 
@@ -16,6 +17,7 @@ class CommitPackageCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: str
+    branchName: Optional[str] = None
     changes: List[Change]
     elementCount: int
     payloadRefs: List[PayloadRef] = Field(default_factory=list)

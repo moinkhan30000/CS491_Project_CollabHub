@@ -11,6 +11,7 @@ namespace RevitVersionControl.Services
         public string ProjectId { get; set; }
         public string ModelId { get; set; }
         public string CurrentCommitId { get; set; }
+        public string CurrentBranchName { get; set; }
         public DateTime LastSyncedAtUtc { get; set; }
         public DateTime? LastSyncedFileWriteUtc { get; set; }
     }
@@ -20,6 +21,7 @@ namespace RevitVersionControl.Services
         public string ProjectId { get; set; }
         public string ModelId { get; set; }
         public string CurrentCommitId { get; set; }
+        public string CurrentBranchName { get; set; }
         public string LastKnownDocumentPath { get; set; }
         public DateTime LastUpdatedUtc { get; set; }
     }
@@ -133,14 +135,14 @@ namespace RevitVersionControl.Services
 
                 if (bestMatch != null)
                 {
-                    SaveState(documentPath, bestMatch.ProjectId, bestMatch.ModelId, bestMatch.CurrentCommitId);
+                    SaveState(documentPath, bestMatch.ProjectId, bestMatch.ModelId, bestMatch.CurrentCommitId, bestMatch.CurrentBranchName);
                     return GetState(documentPath);
                 }
 
                 var projectHint = GetProjectHint(projectId);
                 if (projectHint != null && !string.IsNullOrWhiteSpace(projectHint.CurrentCommitId))
                 {
-                    SaveState(documentPath, projectHint.ProjectId, projectHint.ModelId, projectHint.CurrentCommitId);
+                    SaveState(documentPath, projectHint.ProjectId, projectHint.ModelId, projectHint.CurrentCommitId, projectHint.CurrentBranchName);
                     return GetState(documentPath);
                 }
             }
@@ -174,7 +176,7 @@ namespace RevitVersionControl.Services
             };
         }
 
-        public static void SaveState(string documentPath, string projectId, string modelId, string currentCommitId)
+        public static void SaveState(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main")
         {
             if (string.IsNullOrWhiteSpace(documentPath)
                 || string.IsNullOrWhiteSpace(projectId)
@@ -191,12 +193,13 @@ namespace RevitVersionControl.Services
                 ProjectId = projectId,
                 ModelId = string.IsNullOrWhiteSpace(modelId) ? documentPath : modelId,
                 CurrentCommitId = currentCommitId,
+                CurrentBranchName = currentBranchName ?? "main",
                 LastSyncedAtUtc = DateTime.UtcNow,
                 LastSyncedFileWriteUtc = GetSafeLastWriteTimeUtc(documentPath),
             };
 
             PersistStore(store);
-            SaveProjectHint(documentPath, projectId, modelId, currentCommitId);
+            SaveProjectHint(documentPath, projectId, modelId, currentCommitId, currentBranchName);
         }
 
         public static void SaveAcceptedDocumentHint(string documentPath, string projectId)
@@ -274,7 +277,7 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private static void SaveProjectHint(string documentPath, string projectId, string modelId, string currentCommitId)
+        private static void SaveProjectHint(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main")
         {
             try
             {
@@ -284,6 +287,7 @@ namespace RevitVersionControl.Services
                     ProjectId = projectId,
                     ModelId = string.IsNullOrWhiteSpace(modelId) ? documentPath : modelId,
                     CurrentCommitId = currentCommitId,
+                    CurrentBranchName = currentBranchName ?? "main",
                     LastKnownDocumentPath = documentPath,
                     LastUpdatedUtc = DateTime.UtcNow,
                 };

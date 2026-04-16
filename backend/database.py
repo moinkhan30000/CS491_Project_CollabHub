@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from passlib.context import CryptContext
 
 from entities.user_entity import User
+from entities.branch_entity import Branch
 
 # Load .env file
 load_dotenv()

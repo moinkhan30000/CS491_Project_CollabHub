@@ -11,7 +11,7 @@ from database import create_db_and_tables, seed_dev_test_users
 import uvicorn
 
 # Import routers (will create these)
-from routers import auth, projects, snapshots, diff, merge, base_files, payloads
+from routers import auth, projects, snapshots, diff, merge, base_files, payloads, branches
 
 app = FastAPI(
     title="Revit Version Control API",
@@ -38,6 +38,7 @@ def on_startup():
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(projects.router, prefix="/api/v1/projects", tags=["Projects"])
+app.include_router(branches.router, prefix="/api/v1/projects/{project_id}/branches", tags=["Branches"])
 app.include_router(snapshots.router, prefix="/api/v1/projects", tags=["Snapshots"])
 app.include_router(base_files.router, prefix="/api/v1/projects", tags=["BaseFiles"])
 app.include_router(payloads.router, prefix="/api/v1/projects", tags=["Payloads"])

@@ -8,6 +8,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -25,21 +26,27 @@
                        Text="Unsaved standard edits can publish. New payload-backed additions require saving first."/>
         </StackPanel>
 
-        <!-- Commit Message -->
+        <!-- Branch Selection -->
         <StackPanel Grid.Row="1" Margin="0,0,0,15">
+            <Label Content="Branch (Type to create new one):" FontWeight="Bold"/>
+            <ComboBox Name="BranchComboBox" Height="30" IsEditable="True" />
+        </StackPanel>
+
+        <!-- Commit Message -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,15">
             <Label Content="Commit Message:" FontWeight="Bold"/>
             <TextBox Name="CommitMessageTextBox" Height="30" VerticalContentAlignment="Center"/>
         </StackPanel>
 
         <!-- Description -->
-        <StackPanel Grid.Row="2" Margin="0,0,0,15">
+        <StackPanel Grid.Row="3" Margin="0,0,0,15">
             <Label Content="Description (Optional):"/>
             <TextBox Name="DescriptionTextBox" TextWrapping="Wrap" AcceptsReturn="True" 
                      VerticalScrollBarVisibility="Auto"/>
         </StackPanel>
 
         <!-- Buttons -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Name="PublishButton" Content="Publish" Width="100" Height="35" 
                     Margin="0,0,10,0" Click="PublishButton_Click"
                     Background="#007ACC" Foreground="White" FontWeight="Bold"/>

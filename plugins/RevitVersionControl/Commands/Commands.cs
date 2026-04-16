@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Autodesk.Revit.Attributes;
@@ -100,6 +100,7 @@ namespace RevitVersionControl.Commands
 
                 string commitMessage = publishDialog.CommitMessage;
                 string projectId = publishDialog.SelectedProjectId;
+                string branchName = publishDialog.SelectedBranchName;
                 var apiClient = ApiClient.Instance;
                 var trackedState = DocumentSyncStateService.GetStateForProject(doc.PathName, projectId);
                 bool canUseTrackedState = trackedState != null
@@ -179,6 +180,21 @@ namespace RevitVersionControl.Commands
                 {
                 }
 
+                if (!string.IsNullOrWhiteSpace(branchName))
+                {
+                    try
+                    {
+                        var branchTask = Task.Run(async () => await apiClient.GetBranchesAsync(projectId));
+                        var branches = branchTask.GetAwaiter().GetResult();
+                        if (!branches.Any(b => string.Equals(b.Name, branchName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var createBranchTask = Task.Run(async () => await apiClient.CreateBranchAsync(projectId, branchName, canUseTrackedState ? trackedState.CurrentCommitId : null));
+                            createBranchTask.GetAwaiter().GetResult();
+                        }
+                    }
+                    catch { }
+                }
+
                 var extractor = new ElementExtractor(doc);
                 var extractionOptions = new ExtractionOptions
                 {
@@ -242,6 +258,7 @@ namespace RevitVersionControl.Commands
                             ElementCount = extractedElements.Count,
                             PayloadRefs = payloadPreparation.PayloadRefs,
                             CheckpointSnapshot = null,
+                            BranchName = branchName
                         };
 
                         var packageTask = Task.Run(async () => await ApiClient.Instance.PublishPackageAsync(projectId, package));
@@ -284,13 +301,13 @@ namespace RevitVersionControl.Commands
                         return Result.Failed;
                     }
 
-                    var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot));
+                    var publishTask = Task.Run(async () => await ApiClient.Instance.PublishSnapshotAsync(projectId, snapshot, branchName));
                     commit = publishTask.GetAwaiter().GetResult();
                 }
 
                 if (commit != null)
                 {
-                    DocumentSyncStateService.SaveState(doc.PathName, projectId, modelId, commit.CommitId);
+                    DocumentSyncStateService.SaveState(doc.PathName, projectId, modelId, commit.CommitId, branchName);
                     SnapshotCacheService.SaveSnapshot(projectId, modelId, commit.CommitId, snapshot);
 
                     string modeText = usedPackagePublish
@@ -392,6 +409,8 @@ namespace RevitVersionControl.Commands
                 string trackedModelId = pullDialog.SelectedModelId
                                         ?? DocumentSyncStateService.GetStateForProject(doc.PathName, projectId)?.ModelId
                                         ?? doc.PathName;
+                
+                string targetBranchName = pullDialog.SelectedBranchName;
 
                 System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
 
@@ -481,7 +500,7 @@ namespace RevitVersionControl.Commands
 
                 if (applyResponse.Success)
                 {
-                    DocumentSyncStateService.SaveState(doc.PathName, projectId, trackedModelId, targetCommit);
+                    DocumentSyncStateService.SaveState(doc.PathName, projectId, trackedModelId, targetCommit, targetBranchName);
                     try
                     {
                         var extractor = new ElementExtractor(doc);

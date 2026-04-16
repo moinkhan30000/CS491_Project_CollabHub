@@ -181,15 +181,30 @@ namespace RevitVersionControl.Services
             }
         }
 
+        // ========== Branches ==========
+
+        public async Task<List<Branch>> GetBranchesAsync(string projectId)
+        {
+            var response = await GetAsync<List<Branch>>($"/projects/{projectId}/branches");
+            return response ?? new List<Branch>();
+        }
+
+        public async Task<Branch> CreateBranchAsync(string projectId, string branchName, string headCommitId = null)
+        {
+            var payload = new { name = branchName, headCommitId = headCommitId };
+            return await PostAsync<Branch>($"/projects/{projectId}/branches", payload);
+        }
+
         // ========== Snapshots & Commits ==========
 
-        public async Task<Commit> PublishSnapshotAsync(string projectId, ElementSnapshot snapshot)
+        public async Task<Commit> PublishSnapshotAsync(string projectId, ElementSnapshot snapshot, string branchName = null)
         {
             var payload = new
             {
                 modelId = snapshot.ModelId,
                 commitMessage = snapshot.CommitMessage,
                 parentCommit = snapshot.ParentCommit,
+                branchName = branchName,
                 snapshot = snapshot
             };
             
@@ -483,6 +498,27 @@ namespace RevitVersionControl.Services
         public int Total { get; set; }
     }
 
+    public class Branch
+    {
+        [JsonProperty("branchId")]
+        public string BranchId { get; set; }
+
+        [JsonProperty("projectId")]
+        public string ProjectId { get; set; }
+
+        [JsonProperty("name")]
+        public string Name { get; set; }
+
+        [JsonProperty("headCommitId")]
+        public string HeadCommitId { get; set; }
+
+        [JsonProperty("createdAt")]
+        public DateTime CreatedAt { get; set; }
+
+        [JsonProperty("createdBy")]
+        public string CreatedBy { get; set; }
+    }
+
     public class Commit
     {
         [JsonProperty("commitId")]
@@ -584,6 +620,9 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("checkpointSnapshot")]
         public ElementSnapshot CheckpointSnapshot { get; set; }
+
+        [JsonProperty("branchName")]
+        public string BranchName { get; set; }
     }
 
     public class BaseFileStatus

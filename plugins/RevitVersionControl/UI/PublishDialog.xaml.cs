@@ -10,6 +10,7 @@ namespace RevitVersionControl.UI
     {
         public string CommitMessage { get; private set; }
         public string SelectedProjectId { get; private set; }
+        public string SelectedBranchName { get; private set; }
         public string ModelPath { get; }
 
         private readonly ApiClient _apiClient = ApiClient.Instance;
@@ -70,6 +71,37 @@ namespace RevitVersionControl.UI
             if (ProjectComboBox.SelectedItem is Project project)
             {
                 await UpdateBaseFileStatusAsync(project.ProjectId);
+                await LoadBranchesAsync(project.ProjectId);
+            }
+        }
+
+        private async Task LoadBranchesAsync(string projectId)
+        {
+            try
+            {
+                BranchComboBox.IsEnabled = false;
+                var branches = await _apiClient.GetBranchesAsync(projectId);
+                BranchComboBox.ItemsSource = branches;
+                BranchComboBox.DisplayMemberPath = "Name";
+                
+                string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
+                int trackedIndex = branches.FindIndex(b => string.Equals(b.Name, trackedBranch, StringComparison.OrdinalIgnoreCase));
+                
+                if (trackedIndex >= 0)
+                {
+                    BranchComboBox.SelectedIndex = trackedIndex;
+                }
+                else
+                {
+                    BranchComboBox.Text = trackedBranch;
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                BranchComboBox.IsEnabled = true;
             }
         }
 
@@ -124,9 +156,17 @@ namespace RevitVersionControl.UI
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(BranchComboBox.Text))
+            {
+                MessageBox.Show("Please select or enter a branch.", "Validation Error", 
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             CommitMessage = CommitMessageTextBox.Text;
             var selectedProject = ProjectComboBox.SelectedItem as Project;
             SelectedProjectId = selectedProject?.ProjectId;
+            SelectedBranchName = BranchComboBox.Text.Trim();
 
             DialogResult = true;
             Close();
