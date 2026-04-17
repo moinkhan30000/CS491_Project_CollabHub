@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Threading.Tasks;
+using System.Linq;
 using RevitVersionControl.Services;
 
 namespace RevitVersionControl.UI
@@ -161,6 +162,21 @@ namespace RevitVersionControl.UI
                 MessageBox.Show("Please select or enter a branch.", "Validation Error", 
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
+            }
+
+            string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
+            string selectedBranch = BranchComboBox.Text.Trim();
+
+            if (!string.Equals(selectedBranch, trackedBranch, StringComparison.OrdinalIgnoreCase))
+            {
+                var existingBranches = BranchComboBox.ItemsSource as System.Collections.Generic.List<Branch>;
+                if (existingBranches != null && existingBranches.Any(b => string.Equals(b.Name, selectedBranch, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show($"You are currently on branch '{trackedBranch}'. To commit to the existing branch '{selectedBranch}', you must Pull it first to safely switch your local document state over to that branch.\n\n(You may only specify a different branch here if you want to branch off and create a NEW branch.)", 
+                        "Git-like Branch Protection", 
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
             }
 
             CommitMessage = CommitMessageTextBox.Text;

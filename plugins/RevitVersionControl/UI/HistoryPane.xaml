@@ -11,14 +11,22 @@
         <!-- Header -->
         <Border Grid.Row="0" Background="#2D2D30" Padding="10">
             <StackPanel>
-                <TextBlock Text="Version History" FontSize="16" FontWeight="Bold" 
-                           Foreground="White" Margin="0,0,0,5"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Text="Version History" FontSize="16" FontWeight="Bold" 
+                               Foreground="White" Margin="0,0,15,0"/>
+                    <TextBlock Name="CurrentTrackedBranchText" Text="Active Branch: -" 
+                               FontSize="13" Foreground="#87CEFA" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <Button Name="RefreshButton" Content="Refresh" Width="80" Height="25" Margin="0,0,10,0"
                             Click="RefreshButton_Click"/>
                     <TextBlock Text="Project:" Foreground="White" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <ComboBox Name="ProjectComboBox" Width="220" Height="25"
+                    <ComboBox Name="ProjectComboBox" Width="200" Height="25"
                               SelectionChanged="ProjectComboBox_SelectionChanged"
+                              DisplayMemberPath="Name"/>
+                    <TextBlock Text="Branch:" Foreground="White" VerticalAlignment="Center" Margin="15,0,5,0"/>
+                    <ComboBox Name="BranchComboBox" Width="150" Height="25"
+                              SelectionChanged="BranchComboBox_SelectionChanged"
                               DisplayMemberPath="Name"/>
                 </StackPanel>
             </StackPanel>
@@ -38,6 +46,7 @@
                             </DataTemplate>
                         </GridViewColumn.CellTemplate>
                     </GridViewColumn>
+                    <GridViewColumn Header="Branch" Width="100" DisplayMemberBinding="{Binding BranchName}"/>
                     <GridViewColumn Header="Author" Width="120" DisplayMemberBinding="{Binding Author}"/>
                     <GridViewColumn Header="Date" Width="150" DisplayMemberBinding="{Binding Timestamp}"/>
                     <GridViewColumn Header="Changes" Width="80" DisplayMemberBinding="{Binding ChangedElements}"/>

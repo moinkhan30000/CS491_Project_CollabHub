@@ -545,6 +545,9 @@ namespace RevitVersionControl.Services
         [JsonProperty("timestamp")]
         public DateTime Timestamp { get; set; }
         
+        [JsonProperty("branchName")]
+        public string BranchName { get; set; }
+        
         [JsonProperty("author")]
         public object Author { get; set; }
 

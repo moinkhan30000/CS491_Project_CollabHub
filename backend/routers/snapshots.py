@@ -94,9 +94,10 @@ async def create_snapshot(
         parent_commit=parent_commit_id,
         snapshot=commit_data.snapshot if is_resnapshot else None,
         diff=None,
-        ops_payload=ops_payload if not is_resnapshot else None,
+        ops_payload=ops_payload,
         element_count=len(commit_data.snapshot.elements),
         changed_elements=len(diff_result.changes),
+        branch_name=commit_data.branchName,
     )
 
     if commit_data.branchName:
@@ -165,6 +166,7 @@ async def create_commit_package(
         ops_payload=ops_payload,
         element_count=package_data.elementCount,
         changed_elements=len(package_data.changes),
+        branch_name=package_data.branchName,
     )
 
     if package_data.branchName:

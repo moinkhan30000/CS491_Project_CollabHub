@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 import uuid
 from typing import List, Optional, Any
 
@@ -42,6 +42,7 @@ class CommitRepository:
         ops_payload: Optional[OpsCommitPayload] = None,
         element_count: Optional[int] = None,
         changed_elements: Optional[int] = None,
+        branch_name: Optional[str] = None,
     ) -> Commit:
         """
         Create a commit storing either a full snapshot (root / checkpoint)
@@ -88,6 +89,7 @@ class CommitRepository:
                     len(diff) if diff else 0
                 ),
                 snapshot=payload,
+                branchName=branch_name,
             )
 
             project = session.get(Project, project_id)

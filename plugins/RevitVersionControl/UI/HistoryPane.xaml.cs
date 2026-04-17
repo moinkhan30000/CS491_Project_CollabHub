@@ -65,6 +65,34 @@ namespace RevitVersionControl.UI
             }
         }
 
+        private async Task LoadBranchesAsync(string projectId)
+        {
+            try
+            {
+                BranchComboBox.IsEnabled = false;
+                var branches = await _apiClient.GetBranchesAsync(projectId);
+                
+                var allBranches = new List<Branch> { new Branch { Name = "All Branches" } };
+                allBranches.AddRange(branches);
+                
+                BranchComboBox.ItemsSource = allBranches;
+                BranchComboBox.DisplayMemberPath = "Name";
+                
+                if (allBranches.Count > 0)
+                {
+                    BranchComboBox.SelectedIndex = 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Ignore silent load failures for branches
+            }
+            finally
+            {
+                BranchComboBox.IsEnabled = true;
+            }
+        }
+
         private async Task LoadCommitsAsync(string projectId)
         {
             try
@@ -84,6 +112,28 @@ namespace RevitVersionControl.UI
                     .OrderByDescending(c => c.Timestamp)
                     .ToList();
 
+                var selectedBranch = BranchComboBox.SelectedItem as Branch;
+                if (selectedBranch != null && selectedBranch.Name != "All Branches")
+                {
+                    if (!string.IsNullOrEmpty(selectedBranch.HeadCommitId))
+                    {
+                        var branchCommits = new List<Commit>();
+                        var commitMap = commits.ToDictionary(c => c.CommitId, StringComparer.OrdinalIgnoreCase);
+                        
+                        string currentId = selectedBranch.HeadCommitId;
+                        while (!string.IsNullOrEmpty(currentId) && commitMap.TryGetValue(currentId, out Commit currentCommit))
+                        {
+                            branchCommits.Add(currentCommit);
+                            currentId = currentCommit.ParentCommit;
+                        }
+                        commits = branchCommits;
+                    }
+                    else
+                    {
+                        commits = commits.Where(c => string.Equals(c.BranchName, selectedBranch.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+                    }
+                }
+
                 var items = new List<CommitItem>();
                 foreach (var commit in commits)
                 {
@@ -91,6 +141,7 @@ namespace RevitVersionControl.UI
                     {
                         Message = commit.Message,
                         CommitId = commit.CommitId,
+                        BranchName = string.IsNullOrEmpty(commit.BranchName) ? "-" : commit.BranchName,
                         Author = commit.GetAuthorName(),
                         Timestamp = commit.Timestamp.ToString("yyyy-MM-dd HH:mm"),
                         ChangedElements = commit.ChangedElements
@@ -99,7 +150,7 @@ namespace RevitVersionControl.UI
 
                 if (items.Count == 0)
                 {
-                    items.Add(new CommitItem { Message = "No commits found.", CommitId = "", Author = "", Timestamp = "", ChangedElements = 0 });
+                    items.Add(new CommitItem { Message = "No commits found.", CommitId = "", BranchName = "-", Author = "", Timestamp = "", ChangedElements = 0 });
                 }
 
                 CommitListView.ItemsSource = items;
@@ -142,6 +193,20 @@ namespace RevitVersionControl.UI
         {
             if (ProjectComboBox.SelectedItem is Project project)
             {
+                var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
+                CurrentTrackedBranchText.Text = hint != null && !string.IsNullOrWhiteSpace(hint.CurrentBranchName) 
+                    ? $"Active Branch: {hint.CurrentBranchName}" 
+                    : "Active Branch: none";
+
+                await LoadBranchesAsync(project.ProjectId);
+                await LoadCommitsAsync(project.ProjectId);
+            }
+        }
+
+        private async void BranchComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
                 await LoadCommitsAsync(project.ProjectId);
             }
         }
@@ -150,6 +215,7 @@ namespace RevitVersionControl.UI
         {
             public string Message { get; set; }
             public string CommitId { get; set; }
+            public string BranchName { get; set; }
             public string Author { get; set; }
             public string Timestamp { get; set; }
             public int ChangedElements { get; set; }

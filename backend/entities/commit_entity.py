@@ -13,6 +13,7 @@ class CommitBase(SQLModel):
     elementCount: int
     changedElements: int
     changeType: str = Field(default="MOD")  # ADD, MOD, DEL
+    branchName: Optional[str] = Field(default=None)
 
 # 2. Database Table: Inherits Base + adds Primary Key
 class Commit(CommitBase, table=True):

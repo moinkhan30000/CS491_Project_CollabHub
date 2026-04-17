@@ -300,7 +300,7 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private static ProjectSyncHint GetProjectHint(string projectId)
+        public static ProjectSyncHint GetProjectHint(string projectId)
         {
             if (string.IsNullOrWhiteSpace(projectId))
                 return null;

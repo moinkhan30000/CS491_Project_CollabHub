@@ -41,6 +41,7 @@ class CommitDetail(BaseModel):
     commitId: str
     children: List[str] = []
     summary: Dict[str, int]
+    branchName: Optional[str] = None
 
 class CommitSummary(BaseModel):
     projectId: str
@@ -52,3 +53,4 @@ class CommitSummary(BaseModel):
     elementCount: int
     changedElements: int
     commitId: str
+    branchName: Optional[str] = None
