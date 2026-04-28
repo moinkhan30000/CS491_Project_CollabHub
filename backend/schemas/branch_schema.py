@@ -13,3 +13,4 @@ class BranchDetail(BaseModel):
     headCommitId: Optional[str]
     createdAt: datetime
     createdBy: str
+    creatorName: Optional[str] = None

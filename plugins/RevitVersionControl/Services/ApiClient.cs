@@ -195,6 +195,24 @@ namespace RevitVersionControl.Services
             return await PostAsync<Branch>($"/projects/{projectId}/branches", payload);
         }
 
+        public async Task<bool> DeleteBranchAsync(string projectId, string branchName)
+        {
+            try
+            {
+                var response = await _httpClient.DeleteAsync($"{_baseUrl}/projects/{projectId}/branches/{Uri.EscapeDataString(branchName)}");
+                if (response.IsSuccessStatusCode) return true;
+                
+                var errorContent = await response.Content.ReadAsStringAsync();
+                LastError = $"HTTP {(int)response.StatusCode}: {errorContent}";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+                return false;
+            }
+        }
+
         // ========== Snapshots & Commits ==========
 
         public async Task<Commit> PublishSnapshotAsync(string projectId, ElementSnapshot snapshot, string branchName = null)
@@ -517,6 +535,9 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("createdBy")]
         public string CreatedBy { get; set; }
+
+        [JsonProperty("creatorName")]
+        public string CreatorName { get; set; }
     }
 
     public class Commit

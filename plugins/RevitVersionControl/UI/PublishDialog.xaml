@@ -26,10 +26,16 @@
                        Text="Unsaved standard edits can publish. New payload-backed additions require saving first."/>
         </StackPanel>
 
-        <!-- Branch Selection -->
+        <!-- Branch Info / Detached State -->
         <StackPanel Grid.Row="1" Margin="0,0,0,15">
-            <Label Content="Branch (Type to create new one):" FontWeight="Bold"/>
-            <ComboBox Name="BranchComboBox" Height="30" IsEditable="True" />
+            <TextBlock Name="PublishingToBranchText" FontWeight="Bold" Foreground="#007ACC" 
+                       Text="Publishing to active branch: main" FontSize="14" Margin="0,0,0,5"/>
+            <StackPanel Name="DetachedBranchPanel" Visibility="Collapsed">
+                <TextBlock Text="You are currently on an older commit. To prevent overwriting history, you must create a new branch." 
+                           Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                <Label Content="New Branch Name:" FontWeight="Bold" Padding="0,0,0,2"/>
+                <TextBox Name="NewBranchTextBox" Height="30" VerticalContentAlignment="Center"/>
+            </StackPanel>
         </StackPanel>
 
         <!-- Commit Message -->

@@ -1,0 +1,39 @@
+<Window x:Class="RevitVersionControl.UI.BranchManagerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Manage Branches" Height="400" Width="600"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Branches for Project: " FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+            <TextBlock Name="ProjectNameText" Text="Loading..." FontSize="14" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <ListView Grid.Row="1" x:Name="BranchListView" BorderThickness="1">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Branch Name" Width="150" DisplayMemberBinding="{Binding Name}"/>
+                    <GridViewColumn Header="Creator" Width="150" DisplayMemberBinding="{Binding CreatorName}"/>
+                    <GridViewColumn Header="Created At" Width="120" DisplayMemberBinding="{Binding CreatedAt, StringFormat=\{0:yyyy-MM-dd HH:mm\}}"/>
+                    <GridViewColumn Header="Head Commit" Width="120" DisplayMemberBinding="{Binding HeadCommitId}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <Button Name="SwitchButton" Content="Switch to Branch" Width="130" Height="30" Margin="0,0,10,0" 
+                    Click="SwitchButton_Click" Background="#007ACC" Foreground="White" FontWeight="Bold"/>
+            <Button Name="NewBranchButton" Content="New Branch" Width="100" Height="30" Margin="0,0,10,0" 
+                    Click="NewBranchButton_Click"/>
+            <Button Name="DeleteBranchButton" Content="Delete" Width="80" Height="30" Margin="0,0,10,0" 
+                    Click="DeleteBranchButton_Click" Background="#d9534f" Foreground="White"/>
+            <Button Content="Close" Width="80" Height="30" Click="CloseButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -6,12 +6,14 @@ from entities.user_entity import User
 from repositories.project_repository import ProjectRepository
 from repositories.branch_repository import BranchRepository
 from repositories.commit_repository import CommitRepository
+from repositories.user_repository import UserRepository
 from schemas.branch_schema import BranchCreate, BranchDetail
 
 router = APIRouter()
 project_repo = ProjectRepository()
 branch_repo = BranchRepository()
 commit_repo = CommitRepository()
+user_repo = UserRepository()
 
 @router.get("", response_model=List[BranchDetail])
 async def list_branches(project_id: str, current_user: User = Depends(get_current_user)):
@@ -21,7 +23,13 @@ async def list_branches(project_id: str, current_user: User = Depends(get_curren
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         
     branches = branch_repo.get_project_branches(project_id)
-    return branches
+    branch_details = []
+    for branch in branches:
+        creator = user_repo.get_user_by_id(branch.createdBy)
+        branch_dict = branch.model_dump()
+        branch_dict["creatorName"] = creator.fullName if creator else "Unknown"
+        branch_details.append(BranchDetail(**branch_dict))
+    return branch_details
 
 @router.post("", response_model=BranchDetail, status_code=status.HTTP_201_CREATED)
 async def create_branch(project_id: str, branch_data: BranchCreate, current_user: User = Depends(get_current_user)):
@@ -45,7 +53,9 @@ async def create_branch(project_id: str, branch_data: BranchCreate, current_user
         user_id=current_user.userId, 
         head_commit_id=branch_data.headCommitId
     )
-    return branch
+    branch_dict = branch.model_dump()
+    branch_dict["creatorName"] = current_user.fullName
+    return BranchDetail(**branch_dict)
 
 @router.get("/{branch_name}", response_model=BranchDetail)
 async def get_branch(project_id: str, branch_name: str, current_user: User = Depends(get_current_user)):
@@ -58,4 +68,26 @@ async def get_branch(project_id: str, branch_name: str, current_user: User = Dep
     if not branch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
 
-    return branch
+    creator = user_repo.get_user_by_id(branch.createdBy)
+    branch_dict = branch.model_dump()
+    branch_dict["creatorName"] = creator.fullName if creator else "Unknown"
+    return BranchDetail(**branch_dict)
+
+@router.delete("/{branch_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_branch(project_id: str, branch_name: str, current_user: User = Depends(get_current_user)):
+    """Delete a specific branch."""
+    project = project_repo.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    if branch_name == "main":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete main branch")
+
+    branch = branch_repo.get_branch(project_id, branch_name)
+    if not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+
+    success = branch_repo.delete_branch(project_id, branch_name)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete branch")
+

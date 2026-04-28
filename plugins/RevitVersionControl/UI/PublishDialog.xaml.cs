@@ -17,6 +17,7 @@ namespace RevitVersionControl.UI
         private readonly ApiClient _apiClient = ApiClient.Instance;
         private readonly bool _hasUnsavedChanges;
         private DocumentSyncStatus _syncStatus;
+        private System.Collections.Generic.List<Branch> _existingBranches;
 
         public PublishDialog(string modelPath, bool hasUnsavedChanges)
         {
@@ -80,29 +81,34 @@ namespace RevitVersionControl.UI
         {
             try
             {
-                BranchComboBox.IsEnabled = false;
-                var branches = await _apiClient.GetBranchesAsync(projectId);
-                BranchComboBox.ItemsSource = branches;
-                BranchComboBox.DisplayMemberPath = "Name";
+                _existingBranches = await _apiClient.GetBranchesAsync(projectId);
                 
                 string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
-                int trackedIndex = branches.FindIndex(b => string.Equals(b.Name, trackedBranch, StringComparison.OrdinalIgnoreCase));
+                var targetBranchObj = _existingBranches?.FirstOrDefault(b => string.Equals(b.Name, trackedBranch, StringComparison.OrdinalIgnoreCase));
                 
-                if (trackedIndex >= 0)
+                bool isDetached = false;
+                if (targetBranchObj != null && !string.IsNullOrWhiteSpace(_syncStatus.State?.CurrentCommitId))
                 {
-                    BranchComboBox.SelectedIndex = trackedIndex;
+                    if (targetBranchObj.HeadCommitId != null && targetBranchObj.HeadCommitId != _syncStatus.State.CurrentCommitId)
+                    {
+                        isDetached = true;
+                    }
+                }
+
+                if (isDetached)
+                {
+                    PublishingToBranchText.Visibility = Visibility.Collapsed;
+                    DetachedBranchPanel.Visibility = Visibility.Visible;
                 }
                 else
                 {
-                    BranchComboBox.Text = trackedBranch;
+                    PublishingToBranchText.Visibility = Visibility.Visible;
+                    DetachedBranchPanel.Visibility = Visibility.Collapsed;
+                    PublishingToBranchText.Text = $"Publishing to active branch: {trackedBranch}";
                 }
             }
             catch
             {
-            }
-            finally
-            {
-                BranchComboBox.IsEnabled = true;
             }
         }
 
@@ -157,32 +163,31 @@ namespace RevitVersionControl.UI
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(BranchComboBox.Text))
-            {
-                MessageBox.Show("Please select or enter a branch.", "Validation Error", 
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
             string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
-            string selectedBranch = BranchComboBox.Text.Trim();
+            string finalBranchToPublish = trackedBranch;
 
-            if (!string.Equals(selectedBranch, trackedBranch, StringComparison.OrdinalIgnoreCase))
+            if (DetachedBranchPanel.Visibility == Visibility.Visible)
             {
-                var existingBranches = BranchComboBox.ItemsSource as System.Collections.Generic.List<Branch>;
-                if (existingBranches != null && existingBranches.Any(b => string.Equals(b.Name, selectedBranch, StringComparison.OrdinalIgnoreCase)))
+                string newBranch = NewBranchTextBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(newBranch))
                 {
-                    MessageBox.Show($"You are currently on branch '{trackedBranch}'. To commit to the existing branch '{selectedBranch}', you must Pull it first to safely switch your local document state over to that branch.\n\n(You may only specify a different branch here if you want to branch off and create a NEW branch.)", 
-                        "Git-like Branch Protection", 
+                    MessageBox.Show("Please enter a new branch name.", "Validation Error", 
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
+
+                if (_existingBranches != null && _existingBranches.Any(b => string.Equals(b.Name, newBranch, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show($"Branch '{newBranch}' already exists. Because you are on an older commit, you must create a NEW branch.", "Branch Exists", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+                finalBranchToPublish = newBranch;
             }
 
             CommitMessage = CommitMessageTextBox.Text;
             var selectedProject = ProjectComboBox.SelectedItem as Project;
             SelectedProjectId = selectedProject?.ProjectId;
-            SelectedBranchName = BranchComboBox.Text.Trim();
+            SelectedBranchName = finalBranchToPublish;
 
             DialogResult = true;
             Close();

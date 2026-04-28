@@ -2,6 +2,9 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="Version History">
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Page.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -17,18 +20,22 @@
                     <TextBlock Name="CurrentTrackedBranchText" Text="Active Branch: -" 
                                FontSize="13" Foreground="#87CEFA" VerticalAlignment="Center" FontWeight="SemiBold"/>
                 </StackPanel>
-                <StackPanel Orientation="Horizontal">
-                    <Button Name="RefreshButton" Content="Refresh" Width="80" Height="25" Margin="0,0,10,0"
+                <WrapPanel Orientation="Horizontal" Margin="0,5,0,0">
+                    <Button Name="RefreshButton" Content="Refresh" Width="80" Height="25" Margin="0,0,10,5"
                             Click="RefreshButton_Click"/>
-                    <TextBlock Text="Project:" Foreground="White" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <ComboBox Name="ProjectComboBox" Width="200" Height="25"
+                    <TextBlock Text="Project:" Foreground="White" VerticalAlignment="Center" Margin="0,0,5,5"/>
+                    <ComboBox Name="ProjectComboBox" Width="200" Height="25" Margin="0,0,0,5"
                               SelectionChanged="ProjectComboBox_SelectionChanged"
                               DisplayMemberPath="Name"/>
-                    <TextBlock Text="Branch:" Foreground="White" VerticalAlignment="Center" Margin="15,0,5,0"/>
-                    <ComboBox Name="BranchComboBox" Width="150" Height="25"
+                    <TextBlock Text="Branch:" Foreground="White" VerticalAlignment="Center" Margin="15,0,5,5"/>
+                    <ComboBox Name="BranchComboBox" Width="150" Height="25" Margin="0,0,0,5"
                               SelectionChanged="BranchComboBox_SelectionChanged"
                               DisplayMemberPath="Name"/>
-                </StackPanel>
+                    <Button Name="ManageBranchesButton" Content="Manage Branches" Width="110" Height="25" Margin="10,0,0,5"
+                            Click="ManageBranchesButton_Click"/>
+                    <Button Name="NetworkGraphButton" Content="View Network Graph" Width="130" Height="25" Margin="10,0,0,5"
+                            Click="NetworkGraphButton_Click" Background="#4CAF50" Foreground="White" FontWeight="Bold"/>
+                </WrapPanel>
             </StackPanel>
         </Border>
 
@@ -40,7 +47,11 @@
                         <GridViewColumn.CellTemplate>
                             <DataTemplate>
                                 <StackPanel>
-                                    <TextBlock Text="{Binding Message}" FontWeight="Bold"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="★ ACTIVE" Foreground="#4CAF50" FontWeight="Bold" Margin="0,0,5,0"
+                                                   Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        <TextBlock Text="{Binding Message}" FontWeight="Bold"/>
+                                    </StackPanel>
                                     <TextBlock Text="{Binding CommitId}" FontSize="10" Foreground="Gray"/>
                                 </StackPanel>
                             </DataTemplate>

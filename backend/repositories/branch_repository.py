@@ -70,3 +70,13 @@ class BranchRepository:
                 session.commit()
                 session.refresh(branch)
             return branch
+
+    def delete_branch(self, project_id: str, branch_name: str) -> bool:
+        with Session(engine) as session:
+            statement = select(Branch).where(Branch.projectId == project_id, Branch.name == branch_name)
+            branch = session.exec(statement).first()
+            if branch:
+                session.delete(branch)
+                session.commit()
+                return True
+            return False
