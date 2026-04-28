@@ -384,6 +384,11 @@ namespace RevitVersionControl.Services
 
         // ========== Merge Operations ==========
 
+        public async Task<MergeResult> MergeAsync(string projectId, MergeRequest request)
+        {
+            return await PostAsync<MergeResult>($"/projects/{projectId}/merge", request);
+        }
+
         public async Task<PullResult> PullChangesAsync(string projectId, string currentCommit, string targetCommit)
         {
             var payload = new
@@ -637,6 +642,77 @@ namespace RevitVersionControl.Services
         public string FileName { get; set; }
     }
 
+    // ========== Diff & Merge DTOs ==========
+
+    public class MergeRequest
+    {
+        [JsonProperty("baseCommit")]
+        public string BaseCommit { get; set; }
+
+        [JsonProperty("sourceCommit")]
+        public string SourceCommit { get; set; }
+
+        [JsonProperty("targetCommit")]
+        public string TargetCommit { get; set; }
+
+        [JsonProperty("resolutions")]
+        public List<Resolution> Resolutions { get; set; } = new List<Resolution>();
+
+        [JsonProperty("message")]
+        public string Message { get; set; }
+    }
+
+    public class MergeResult
+    {
+        [JsonProperty("mergeCommitId")]
+        public string MergeCommitId { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; } // "success", "conflict", "error"
+
+        [JsonProperty("appliedChanges")]
+        public int AppliedChanges { get; set; }
+
+        [JsonProperty("skippedChanges")]
+        public int SkippedChanges { get; set; }
+
+        [JsonProperty("conflicts")]
+        public List<Conflict> Conflicts { get; set; } = new List<Conflict>();
+    }
+
+    public class Resolution
+    {
+        [JsonProperty("elementId")]
+        public string ElementId { get; set; }
+
+        [JsonProperty("resolution")]
+        public string ResolutionType { get; set; } // "keep_local", "accept_remote", "manual_resolve"
+
+        [JsonProperty("customData")]
+        public Dictionary<string, object> CustomData { get; set; }
+    }
+
+    public class Conflict
+    {
+        [JsonProperty("elementId")]
+        public string ElementId { get; set; }
+
+        [JsonProperty("conflictType")]
+        public string ConflictType { get; set; }
+
+        [JsonProperty("description")]
+        public string Description { get; set; }
+
+        [JsonProperty("localChange")]
+        public Dictionary<string, object> LocalChange { get; set; }
+
+        [JsonProperty("remoteChange")]
+        public Dictionary<string, object> RemoteChange { get; set; }
+
+        [JsonProperty("resolutionOptions")]
+        public List<string> ResolutionOptions { get; set; }
+    }
+
     public class DiffResult
     {
         [JsonProperty("baseVersion")]
@@ -652,7 +728,7 @@ namespace RevitVersionControl.Services
         public List<Change> Changes { get; set; }
         
         [JsonProperty("conflicts")]
-        public List<object> Conflicts { get; set; }
+        public List<Conflict> Conflicts { get; set; } // Updated from object to Conflict
     }
 
     public class Change
@@ -739,7 +815,7 @@ namespace RevitVersionControl.Services
         public List<Change> Changes { get; set; }
         
         [JsonProperty("conflicts")]
-        public List<object> Conflicts { get; set; }
+        public List<Conflict> Conflicts { get; set; } // Updated from object to Conflict
         
         [JsonProperty("requiresResolution")]
         public bool RequiresResolution { get; set; }

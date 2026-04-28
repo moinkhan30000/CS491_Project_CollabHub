@@ -5,6 +5,7 @@ Title="Changes &amp; Merge">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/> <!-- New row for conflicts -->
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -15,16 +16,39 @@ Title="Changes &amp; Merge">
                 <TextBlock Text="Changes &amp; Merge" FontSize="16" FontWeight="Bold"
                            Foreground="White" Margin="0,0,0,5"/>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Base: " Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock Text="Local: " Foreground="White" VerticalAlignment="Center"/>
                     <TextBlock x:Name="BaseCommitText" Text="-" Foreground="LightGray" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="Target: " Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock Text="Remote: " Foreground="White" VerticalAlignment="Center"/>
                     <TextBlock x:Name="TargetCommitText" Text="-" Foreground="LightGray" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
         </Border>
 
-        <!-- Changes List -->
-        <Grid Grid.Row="1">
+        <!-- CONFLICTS LIST (Collapsable, only visible if conflicts exist) -->
+        <Border Grid.Row="1" x:Name="ConflictsPanel" Background="#FFF3CD" Padding="10" Visibility="Collapsed" BorderThickness="0,0,0,1" BorderBrush="#E0E0E0">
+            <StackPanel>
+                <TextBlock Text="Merge Conflicts Detected" FontSize="14" FontWeight="Bold" Foreground="#856404" Margin="0,0,0,5" />
+                <ListView Name="ConflictsListView" BorderThickness="0" Background="Transparent" MaxHeight="250" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="White" BorderBrush="#FFEEBA" BorderThickness="1" CornerRadius="3" Margin="0,0,0,5" Padding="5">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Description}" FontWeight="SemiBold" Foreground="#533F03" Margin="0,0,0,5" />
+                                    <!-- Use a binding group to ensure only ONE radio is checked per conflict ID -->
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton Content="Keep Local" GroupName="{Binding ElementId}" IsChecked="{Binding KeepLocal, Mode=TwoWay}" Margin="0,0,15,0" />
+                                        <RadioButton Content="Accept Remote" GroupName="{Binding ElementId}" IsChecked="{Binding AcceptRemote, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </StackPanel>
+        </Border>
+
+        <!-- Changes List (Safe Auto-Merges) -->
+        <Grid Grid.Row="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -76,15 +100,11 @@ Title="Changes &amp; Merge">
         </Grid>
 
         <!-- Action Buttons -->
-        <Border Grid.Row="2" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
+        <Border Grid.Row="3" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0"
-						Click="SelectAll_Click"/>
-                <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0"
-						Click="DeselectAll_Click"/>
-                <Button Content="Highlight in View" Width="120" Height="30" Margin="0,0,15,0"
-                        Background="#FFD700" Click="Highlight_Click"/>
-                <Button Content="Apply Selected" Width="120" Height="30"
+                <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0" Click="SelectAll_Click"/>
+                <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0" Click="DeselectAll_Click"/>
+                <Button x:Name="ApplyButton" Content="Apply Selected" Width="120" Height="30"
                         Background="#28A745" Foreground="White" FontWeight="Bold"
 						Click="ApplySelected_Click"/>
             </StackPanel>

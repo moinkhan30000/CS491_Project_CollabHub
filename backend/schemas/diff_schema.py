@@ -43,7 +43,7 @@ class Resolution(BaseModel):
     customData: Optional[Dict[str, Any]] = None
 
 class MergeRequest(BaseModel):
-    baseCommit: str
+    baseCommit: Optional[str] = None  
     sourceCommit: str
     targetCommit: str
     resolutions: List[Resolution] = []

@@ -20,14 +20,16 @@
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
-  <ItemGroup>
-    <Reference Include="RevitAPI">
-      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
-    </Reference>
-    <Reference Include="RevitAPIUI">
-      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
-    </Reference>
-  </ItemGroup>
+	<ItemGroup>
+		<Reference Include="RevitAPI">
+			<HintPath>$(ProgramW6432)\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="RevitAPIUI">
+			<HintPath>$(ProgramW6432)\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+	</ItemGroup>
 
   <!-- Copy addin + dll after build -->
   <Target Name="CopyAddInFiles" AfterTargets="Build">
