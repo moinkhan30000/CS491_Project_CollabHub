@@ -13,6 +13,7 @@ namespace RevitVersionControl.UI
         private readonly string _currentCommitId;
         private readonly string _projectName;
         public string SelectedBranchToSwitch { get; private set; }
+        public string SelectedBranchToMerge { get; private set; }
 
         public BranchManagerDialog(string projectId, string projectName, string currentCommitId)
         {
@@ -79,6 +80,27 @@ namespace RevitVersionControl.UI
             else
             {
                 MessageBox.Show("Please select a branch to switch to.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void MergeButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (BranchListView.SelectedItem is Branch selectedBranch)
+            {
+                string activeBranch = DocumentSyncStateService.GetStatusForProject(null, _projectId, false)?.State?.CurrentBranchName ?? "main";
+                if (selectedBranch.Name.Equals(activeBranch, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("You cannot merge a branch into itself. Please select a different branch.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                SelectedBranchToMerge = selectedBranch.Name;
+                DialogResult = true;
+                Close();
+            }
+            else
+            {
+                MessageBox.Show("Please select a branch to merge into your current active branch.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 

@@ -27,6 +27,8 @@
         </ListView>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <Button Name="MergeButton" Content="Merge into Current" Width="130" Height="30" Margin="0,0,10,0" 
+                    Click="MergeButton_Click" Background="#28A745" Foreground="White" FontWeight="Bold"/>
             <Button Name="SwitchButton" Content="Switch to Branch" Width="130" Height="30" Margin="0,0,10,0" 
                     Click="SwitchButton_Click" Background="#007ACC" Foreground="White" FontWeight="Bold"/>
             <Button Name="NewBranchButton" Content="New Branch" Width="100" Height="30" Margin="0,0,10,0" 

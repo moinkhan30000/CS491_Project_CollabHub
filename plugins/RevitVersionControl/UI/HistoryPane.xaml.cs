@@ -81,10 +81,13 @@ namespace RevitVersionControl.UI
                 
                 BranchComboBox.ItemsSource = allBranches;
                 BranchComboBox.DisplayMemberPath = "Name";
-                
                 if (allBranches.Count > 0)
                 {
-                    BranchComboBox.SelectedIndex = 0;
+                    string activeBranch = DocumentSyncStateService.GetStatusForProject(
+                        null, projectId, false)?.State?.CurrentBranchName ?? "main";
+                    
+                    int index = allBranches.FindIndex(b => string.Equals(b.Name, activeBranch, StringComparison.OrdinalIgnoreCase));
+                    BranchComboBox.SelectedIndex = index >= 0 ? index : 0;
                 }
             }
             catch (Exception ex)
@@ -273,6 +276,40 @@ namespace RevitVersionControl.UI
                             
                             BranchComboBox.SelectedItem = b;
                             await LoadCommitsAsync(project.ProjectId);
+                        }
+                    }
+                    
+                    string branchToMerge = dialog.SelectedBranchToMerge;
+                    if (!string.IsNullOrEmpty(branchToMerge))
+                    {
+                        var branches = BranchComboBox.ItemsSource as List<Branch>;
+                        var targetBranchObj = branches?.FirstOrDefault(x => string.Equals(x.Name, branchToMerge, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (targetBranchObj != null && !string.IsNullOrWhiteSpace(targetBranchObj.HeadCommitId))
+                        {
+                            try
+                            {
+                                // Use 3-way merge for proper conflict detection
+                                var mergeResult = await _apiClient.Merge3WayAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
+                                if (mergeResult != null)
+                                {
+                                    if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
+                                    {
+                                        DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, project.ProjectId, hint.ModelId, currentCommitId, hint.CurrentBranchName, targetBranchObj.HeadCommitId);
+                                    }
+                                    
+                                    DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
+                                    
+                                    string conflictMsg = mergeResult.HasConflicts 
+                                        ? $"\n\n{mergeResult.Conflicts.Count} CONFLICT(S) detected! Resolve them in the merge pane."
+                                        : "";
+                                    MessageBox.Show($"3-way merge analysis loaded into Changes & Merge Pane.{conflictMsg}\nPlease open it to review and finalize.", "Merge Initiated", MessageBoxButton.OK, MessageBoxImage.Information);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show($"Failed to initiate merge: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                            }
                         }
                     }
                 }

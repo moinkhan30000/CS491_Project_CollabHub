@@ -192,6 +192,10 @@ namespace RevitVersionControl
             string modelId = null) =>
             _diffMergePane?.LoadPullResult(result as PullResult, projectId, currentCommitId, targetCommitId, modelId);
         public void LoadDiffResult(object result) => _diffMergePane?.LoadDiffResult(result as DiffResult);
+
+        public void LoadMerge3WayResult(Merge3WayResult result, string projectId, string sourceCommitId, string targetCommitId, string modelId) =>
+            _diffMergePane?.LoadMerge3WayResult(result, projectId, sourceCommitId, targetCommitId, modelId);
+
         public void Clear() => _diffMergePane?.Clear();
     }
 }

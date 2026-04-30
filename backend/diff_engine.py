@@ -424,3 +424,84 @@ class DiffEngine:
             if idx not in matched_base
         ]
         return matched_pairs, added, deleted
+
+    def detect_spatial_collisions(
+        self,
+        source_changes: List[Change],
+        target_changes: List[Change],
+    ) -> List[Conflict]:
+        """
+        Detect potential spatial collisions between elements added on
+        different branches. Uses location point proximity as a heuristic.
+        Exact geometry intersection is performed on the Revit plugin side.
+        """
+        conflicts = []
+
+        source_adds = [c for c in source_changes if c.changeType == "added" and c.newData]
+        target_adds = [c for c in target_changes if c.changeType == "added" and c.newData]
+
+        if not source_adds or not target_adds:
+            return conflicts
+
+        for s_change in source_adds:
+            s_loc = self._extract_location_point(s_change.newData)
+            if s_loc is None:
+                continue
+
+            for t_change in target_adds:
+                t_loc = self._extract_location_point(t_change.newData)
+                if t_loc is None:
+                    continue
+
+                # Check proximity — if two elements are within 1 foot
+                # of each other, flag for exact check on the plugin side
+                dist = (
+                    (s_loc[0] - t_loc[0]) ** 2 +
+                    (s_loc[1] - t_loc[1]) ** 2 +
+                    (s_loc[2] - t_loc[2]) ** 2
+                ) ** 0.5
+
+                if dist < 1.0:  # 1 foot threshold
+                    conflicts.append(Conflict(
+                        elementId=f"{self._change_identity(s_change)}|{self._change_identity(t_change)}",
+                        conflictType="spatial_collision",
+                        description=(
+                            f"Potential spatial collision: "
+                            f"{s_change.category} ({s_change.elementId}) from source "
+                            f"overlaps with {t_change.category} ({t_change.elementId}) from target"
+                        ),
+                        localChange=s_change.model_dump(),
+                        remoteChange=t_change.model_dump(),
+                        resolutionOptions=["keep_local", "accept_remote", "keep_both"],
+                    ))
+
+        return conflicts
+
+    @staticmethod
+    def _extract_location_point(data: dict) -> list | None:
+        """Extract [x, y, z] from element data's location field."""
+        if not data:
+            return None
+        loc = data.get("location")
+        if not isinstance(loc, dict):
+            return None
+
+        loc_type = loc.get("type")
+        if loc_type == "point":
+            pt = loc.get("point", {})
+            return [
+                float(pt.get("x", 0)),
+                float(pt.get("y", 0)),
+                float(pt.get("z", 0)),
+            ]
+        elif loc_type == "curve":
+            sp = loc.get("startPoint", {})
+            ep = loc.get("endPoint", {})
+            # Use midpoint of curve
+            return [
+                (float(sp.get("x", 0)) + float(ep.get("x", 0))) / 2,
+                (float(sp.get("y", 0)) + float(ep.get("y", 0))) / 2,
+                (float(sp.get("z", 0)) + float(ep.get("z", 0))) / 2,
+            ]
+        return None
+

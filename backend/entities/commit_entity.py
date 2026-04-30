@@ -10,6 +10,7 @@ class CommitBase(SQLModel):
     author: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     parentCommit: Optional[str] = Field(default=None, foreign_key="commit.commitId")
+    parentCommit2: Optional[str] = Field(default=None, foreign_key="commit.commitId")
     elementCount: int
     changedElements: int
     changeType: str = Field(default="MOD")  # ADD, MOD, DEL
