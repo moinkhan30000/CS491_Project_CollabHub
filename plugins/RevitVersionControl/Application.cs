@@ -93,6 +93,12 @@ namespace RevitVersionControl
                     System.Diagnostics.Debug.WriteLine($"Warning: Dockable panes failed to load: {ex.Message}");
                 }
 
+                try { DiffViewerExternalEvent.Register(); }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Warning: DiffViewerExternalEvent registration failed: {ex.Message}");
+                }
+
                 return Result.Succeeded;
             }
             catch (Exception ex)
@@ -142,6 +148,16 @@ namespace RevitVersionControl
                 );
             }
             catch { }
+
+            try
+            {
+                application.RegisterDockablePane(
+                    new DockablePaneId(DiffViewerPaneProvider.PaneGuid),
+                    "Commit Diff Viewer",
+                    new DiffViewerPaneProvider()
+                );
+            }
+            catch { }
         }
 
         private BitmapImage LoadImage(string _imageName)
@@ -165,6 +181,28 @@ namespace RevitVersionControl
         public void Clear() => _historyPane?.Clear();
         public void ReloadProjects() => _historyPane?.ReloadProjects();
         public void Refresh() => _historyPane?.Refresh();
+    }
+
+    public class DiffViewerPaneProvider : IDockablePaneProvider
+    {
+        public static readonly Guid PaneGuid = new Guid("ABCDEF12-3456-7890-ABCD-EF1234567890");
+        public static DiffViewerPaneProvider Instance { get; private set; }
+        private DiffViewerPane _pane;
+
+        public DiffViewerPaneProvider()
+        {
+            Instance = this;
+        }
+
+        public void SetupDockablePane(DockablePaneProviderData data)
+        {
+            _pane = new DiffViewerPane();
+            data.FrameworkElement = _pane;
+            data.InitialState = new DockablePaneState { DockPosition = DockPosition.Right };
+        }
+
+        public void Show(Services.DiffViewBuildResult result) => _pane?.LoadResult(result);
+        public void Clear() => _pane?.Clear();
     }
 
     public class DiffMergePaneProvider : IDockablePaneProvider

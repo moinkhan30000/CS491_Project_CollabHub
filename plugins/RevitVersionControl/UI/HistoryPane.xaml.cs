@@ -152,7 +152,8 @@ namespace RevitVersionControl.UI
                         Author = commit.GetAuthorName(),
                         Timestamp = commit.Timestamp.ToString("yyyy-MM-dd HH:mm"),
                         ChangedElements = commit.ChangedElements,
-                        IsActive = (commit.CommitId == currentCommitId)
+                        IsActive = (commit.CommitId == currentCommitId),
+                        ParentCommit = commit.ParentCommit
                     });
                 }
 
@@ -304,6 +305,264 @@ namespace RevitVersionControl.UI
             public string Timestamp { get; set; }
             public int ChangedElements { get; set; }
             public bool IsActive { get; set; }
+            public string ParentCommit { get; set; }
+        }
+
+        private void CommitListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateCompareButtonState();
+        }
+
+        private void UpdateCompareButtonState()
+        {
+            var selected = GetSelectedCommitItems();
+            if (selected.Count != 2)
+            {
+                CompareCommitsButton.IsEnabled = false;
+                CompareCommitsButton.ToolTip = "Select exactly two commits on the same branch to compare.";
+                return;
+            }
+
+            string a = selected[0].BranchName;
+            string b = selected[1].BranchName;
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)
+                || string.Equals(a, "-", StringComparison.Ordinal)
+                || string.Equals(b, "-", StringComparison.Ordinal)
+                || !string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+            {
+                CompareCommitsButton.IsEnabled = false;
+                CompareCommitsButton.ToolTip = "Cross-branch compare is not supported in v1.";
+                return;
+            }
+
+            CompareCommitsButton.IsEnabled = true;
+            CompareCommitsButton.ToolTip = "Compare the two selected commits.";
+        }
+
+        private List<CommitItem> GetSelectedCommitItems()
+        {
+            var items = new List<CommitItem>();
+            foreach (var item in CommitListView.SelectedItems)
+            {
+                if (item is CommitItem ci && !string.IsNullOrEmpty(ci.CommitId))
+                    items.Add(ci);
+            }
+            return items;
+        }
+
+        private async void CompareCommitsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(ProjectComboBox.SelectedItem is Project project)) return;
+
+            var selected = GetSelectedCommitItems();
+            if (selected.Count != 2)
+            {
+                MessageBox.Show("Please select exactly two commits to compare.", "Compare Commits",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Order: older = base, newer = target.
+            CommitItem older = selected[0];
+            CommitItem newer = selected[1];
+            if (DateTime.TryParse(older.Timestamp, out var aTs) && DateTime.TryParse(newer.Timestamp, out var bTs))
+            {
+                if (aTs > bTs) { var tmp = older; older = newer; newer = tmp; }
+            }
+
+            await OpenDiffViewAsync(project.ProjectId, older.CommitId, newer.CommitId, swapped: false);
+        }
+
+        private async void CompareToParent_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(ProjectComboBox.SelectedItem is Project project)) return;
+
+            var ci = CommitListView.SelectedItem as CommitItem;
+            if (ci == null || string.IsNullOrEmpty(ci.CommitId))
+            {
+                MessageBox.Show("Select a commit row first.", "Compare to parent",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(ci.ParentCommit))
+            {
+                MessageBox.Show("This commit has no parent (root commit). Use 'Compare to...' instead.",
+                    "Compare to parent", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            await OpenDiffViewAsync(project.ProjectId, ci.ParentCommit, ci.CommitId, swapped: false);
+        }
+
+        private async void CompareToOther_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(ProjectComboBox.SelectedItem is Project project)) return;
+
+            var ci = CommitListView.SelectedItem as CommitItem;
+            if (ci == null || string.IsNullOrEmpty(ci.CommitId))
+            {
+                MessageBox.Show("Select a commit row first.", "Compare to...",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Build the candidate list = commits on the same branch, excluding the selected one.
+            var allItems = CommitListView.ItemsSource as IEnumerable<CommitItem>;
+            if (allItems == null)
+            {
+                MessageBox.Show("No commits available.", "Compare to...",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var sameBranchCommits = allItems
+                .Where(x => !string.IsNullOrEmpty(x.CommitId)
+                            && !string.Equals(x.CommitId, ci.CommitId, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(x.BranchName ?? string.Empty, ci.BranchName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                .Select(x => new Commit
+                {
+                    CommitId = x.CommitId,
+                    Message = x.Message,
+                    BranchName = x.BranchName,
+                    Timestamp = DateTime.TryParse(x.Timestamp, out var ts) ? ts : DateTime.MinValue,
+                    Author = x.Author
+                })
+                .ToList();
+
+            if (sameBranchCommits.Count == 0)
+            {
+                MessageBox.Show("No other commits on the same branch to compare against.", "Compare to...",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var picker = new ComparePickerDialog(sameBranchCommits, ci.CommitId);
+            if (picker.ShowDialog() != true || string.IsNullOrEmpty(picker.SelectedCommitId))
+                return;
+
+            // Determine ordering by timestamp.
+            DateTime ciTs = DateTime.TryParse(ci.Timestamp, out var t1) ? t1 : DateTime.MinValue;
+            DateTime pickedTs = sameBranchCommits.FirstOrDefault(c => string.Equals(c.CommitId, picker.SelectedCommitId, StringComparison.OrdinalIgnoreCase))?.Timestamp ?? DateTime.MinValue;
+
+            string baseId = ci.CommitId;
+            string targetId = picker.SelectedCommitId;
+            bool swapped = false;
+            if (pickedTs > ciTs)
+            {
+                baseId = ci.CommitId;
+                targetId = picker.SelectedCommitId;
+            }
+            else
+            {
+                baseId = picker.SelectedCommitId;
+                targetId = ci.CommitId;
+                swapped = true;
+            }
+
+            await OpenDiffViewAsync(project.ProjectId, baseId, targetId, swapped);
+        }
+
+        private async Task OpenDiffViewAsync(string projectId, string baseCommitId, string targetCommitId, bool swapped)
+        {
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                MessageBox.Show("Select a project first.", "Compare Commits",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (string.Equals(baseCommitId, targetCommitId, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Base and target are the same commit — nothing to diff.", "Compare Commits",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            CompareCommitsButton.IsEnabled = false;
+            try
+            {
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+
+                var (diff, baseSnapshot, error) = await DiffViewService.FetchDiffAsync(projectId, baseCommitId, targetCommitId);
+
+                System.Windows.Input.Mouse.OverrideCursor = null;
+
+                if (!string.IsNullOrEmpty(error) || diff == null)
+                {
+                    MessageBox.Show(error ?? "Failed to fetch diff.", "Compare Commits",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                int total = diff.Summary != null && diff.Summary.TryGetValue("total", out var t) ? t : (diff.Changes?.Count ?? 0);
+                if (total == 0)
+                {
+                    MessageBox.Show("No differences between these commits.", "Compare Commits",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (total > DiffViewService.MaxChangesWarn && total <= DiffViewService.MaxChangesHardCap)
+                {
+                    var confirm = MessageBox.Show(
+                        $"This diff contains {total} changes. Building the diff view may take some time. Continue?",
+                        "Large Diff",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    if (confirm != MessageBoxResult.Yes) return;
+                }
+
+                if (DiffViewerExternalEvent.Instance == null || DiffViewerExternalEvent.Event == null)
+                {
+                    MessageBox.Show("Diff viewer is not registered. Restart Revit.", "Compare Commits",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var sessionId = Guid.NewGuid();
+                var request = new DiffViewerRequest
+                {
+                    Operation = DiffViewerOperation.Build,
+                    BuildRequest = new DiffViewBuildRequest
+                    {
+                        ProjectId = projectId,
+                        BaseCommitId = baseCommitId,
+                        TargetCommitId = targetCommitId,
+                        Diff = diff,
+                        BaseSnapshot = baseSnapshot,
+                        SessionId = sessionId,
+                        OrderSwapped = swapped
+                    },
+                    OnBuildComplete = result =>
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (!result.Success)
+                            {
+                                MessageBox.Show(result.Message ?? "Failed to build diff view.", "Compare Commits",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
+                                return;
+                            }
+
+                            DiffViewerPaneProvider.Instance?.Show(result);
+                        });
+                    }
+                };
+
+                DiffViewerExternalEvent.Instance.Queue(request);
+                DiffViewerExternalEvent.Event.Raise();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Input.Mouse.OverrideCursor = null;
+                MessageBox.Show($"Compare failed: {ex.Message}", "Compare Commits",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                UpdateCompareButtonState();
+            }
         }
     }
 }
