@@ -6,14 +6,14 @@ element on two different branches.
 
 Three outcomes per element:
 
-  1. TRUE CONFLICT  — both branches changed the same parameter to
+  1. TRUE CONFLICT   both branches changed the same parameter to
                       different values : Conflict(parameter_conflict)
 
-  2. AUTO-MERGE     — both branches changed the element but on completely
+  2. AUTO-MERGE      both branches changed the element but on completely
                       different parameters : a merged Change is returned,
                       no Conflict raised
 
-  3. GEOMETRY/LOCATION CONFLICT — both branches moved or reshaped the same
+  3. GEOMETRY/LOCATION CONFLICT  both branches moved or reshaped the same
                       element : Conflict(concurrent_modification) as before,
                       because spatial resolution requires user judgement
 
@@ -47,8 +47,8 @@ class ParameterConflictDetector:
         Compare same-element modifications across two branches.
 
         Returns:
-            conflicts    — Conflict objects that need user resolution
-            auto_merged  — Change objects that were safely merged and need
+            conflicts     Conflict objects that need user resolution
+            auto_merged   Change objects that were safely merged and need
                            no user input
         """
         source_mods: Dict[str, Change] = {
@@ -87,16 +87,16 @@ class ParameterConflictDetector:
         """
         Analyse one element that was modified on both branches.
 
-        Returns (conflict, auto_merged_change) — exactly one of the two
+        Returns (conflict, auto_merged_change) ï¿½ exactly one of the two
         will be non-None, or both None if there is nothing actionable.
         """
-        # Geometry or location conflict — requires user judgement
+        # Geometry or location conflict ï¿½ requires user judgement
         if src.geometryChanged and tgt.geometryChanged:
             return _make_conflict(
                 elem_id=elem_id,
                 conflict_type="concurrent_modification",
                 description=(
-                    f"Element {elem_id} has geometry changes on both branches — "
+                    f"Element {elem_id} has geometry changes on both branches ï¿½ "
                     "manual resolution required."
                 ),
                 src=src,
@@ -109,7 +109,7 @@ class ParameterConflictDetector:
                 elem_id=elem_id,
                 conflict_type="concurrent_modification",
                 description=(
-                    f"Element {elem_id} was moved on both branches — "
+                    f"Element {elem_id} was moved on both branches ï¿½ "
                     "manual resolution required."
                 ),
                 src=src,
@@ -136,7 +136,7 @@ class ParameterConflictDetector:
                 conflicting_params=clashing,
             ), None
 
-        # No clashing params — auto-merge: combine both param lists
+        # No clashing params ï¿½ auto-merge: combine both param lists
         merged_change = _auto_merge(src, tgt)
         return None, merged_change
 

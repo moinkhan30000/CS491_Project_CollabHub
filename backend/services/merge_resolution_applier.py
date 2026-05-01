@@ -7,10 +7,10 @@ state ready to be committed or applied.
 
 Resolution semantics
 --------------------
-keep_local      — use the source-branch version of the element
-accept_remote   — use the target-branch version of the element
-keep_both       — spatial_collision only: include BOTH added elements
-manual_resolve  — skip; the caller (frontend/apply path) will handle it
+keep_local      - use the source-branch version of the element
+accept_remote   - use the target-branch version of the element
+keep_both       - spatial_collision only: include BOTH added elements
+manual_resolve  - skip; the caller (frontend/apply path) will handle it
 
 This module is intentionally standalone.
 It has no dependency on routers, repositories, or the Revit plugin.
@@ -81,11 +81,11 @@ class MergeResolutionApplier:
             if ident not in conflicted_ids and ident not in auto_merged_ids and ident not in result:
                 result[ident] = change
 
-        # 3. Auto-merged changes — overwrite any individual branch version
+        # 3. Auto-merged changes - overwrite any individual branch version
         for change in auto_merged:
             result[_change_identity(change)] = change
 
-        # 4. Both-deleted — include the delete once (agreed outcome)
+        # 4. Both-deleted - include the delete once (agreed outcome)
         for ident in both_deleted_set:
             # Find the delete change from either branch to get full metadata
             delete_change = _find_change_by_identity(ident, source_changes) \
@@ -93,7 +93,7 @@ class MergeResolutionApplier:
             if delete_change:
                 result[ident] = delete_change
 
-        # 5. Conflicted elements — apply resolutions
+        # 5. Conflicted elements - apply resolutions
         source_by_id = {_change_identity(c): c for c in source_changes}
         target_by_id = {_change_identity(c): c for c in target_changes}
 
@@ -116,7 +116,7 @@ class MergeResolutionApplier:
             elif resolution == "keep_both":
                 # Only valid for spatial_collision (both are "added" changes).
                 # Include the source element under its own identity and the
-                # target element under its own identity — they are distinct
+                # target element under its own identity - they are distinct
                 # elements that happen to overlap spatially.
                 if conflict.conflictType == "spatial_collision":
                     src_ident, tgt_ident = _split_spatial_id(conflict.elementId)
@@ -127,14 +127,14 @@ class MergeResolutionApplier:
                     if tgt_change:
                         result[tgt_ident] = tgt_change
                 else:
-                    # keep_both on non-spatial conflict is not meaningful —
+                    # keep_both on non-spatial conflict is not meaningful -
                     # fall back to keep_local so we never silently drop a change
                     change = _find_change_by_identity(conflict_ident, source_changes)
                     if change:
                         result[conflict_ident] = change
 
             else:
-                # manual_resolve or unknown — caller is responsible
+                # manual_resolve or unknown - caller is responsible
                 skipped.append(conflict_ident)
 
         return list(result.values())
