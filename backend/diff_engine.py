@@ -93,12 +93,16 @@ class DiffEngine:
         self,
         local_changes: List[Change],
         remote_changes: List[Change],
-    ) -> Tuple[List[Conflict], List[Change]]:
+    ) -> Tuple[List[Conflict], List[Change], List[str]]:
         """
-        Extended version of detect_conflicts that also returns the auto-merged
-        changes so the merge router can include them in Merge3WayResult.
+        Full conflict analysis returning three lists:
+          conflicts     — changes that need user resolution
+          auto_merged   — safely merged changes (different params on same element)
+          both_deleted  — element IDs deleted on both branches (not a conflict,
+                          informational — the delete is the agreed outcome)
         """
         conflicts: List[Conflict] = []
+        both_deleted: List[str] = []
 
         local_dict  = {self._change_identity(c): c for c in local_changes}
         remote_dict = {self._change_identity(c): c for c in remote_changes}
@@ -106,6 +110,13 @@ class DiffEngine:
         for elem_id in set(local_dict) & set(remote_dict):
             local  = local_dict[elem_id]
             remote = remote_dict[elem_id]
+
+            # Both deleted — agreed outcome, not a conflict
+            if local.changeType == "deleted" and remote.changeType == "deleted":
+                both_deleted.append(elem_id)
+                continue
+
+            # One deleted, one modified
             if (local.changeType == "deleted") != (remote.changeType == "deleted"):
                 conflicts.append(Conflict(
                     elementId=elem_id,
@@ -119,7 +130,7 @@ class DiffEngine:
         param_conflicts, auto_merged = self._param_detector.analyse(local_changes, remote_changes)
         conflicts.extend(param_conflicts)
 
-        return conflicts, auto_merged
+        return conflicts, auto_merged, both_deleted
 
     def detect_spatial_collisions(self, source_changes: List[Change], target_changes: List[Change]) -> List[Conflict]:
         """

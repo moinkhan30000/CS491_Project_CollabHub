@@ -33,7 +33,7 @@ class Conflict(BaseModel):
     localChange: Optional[Dict[str, Any]] = None
     remoteChange: Optional[Dict[str, Any]] = None
     resolutionOptions: List[Literal["keep_local", "accept_remote", "keep_both", "manual_resolve"]]
-    conflictingParams: Optional[List[str]] = None   # populated for parameter_conflict type
+    conflictingParams: Optional[List[str]] = None   # parameter_conflict: which params clash
 
 class DiffResult(BaseModel):
     baseVersion: str
@@ -86,4 +86,5 @@ class Merge3WayResult(BaseModel):
     targetChanges: List[Change] = []     # changes from ancestor → theirs
     conflicts: List[Conflict] = []
     hasConflicts: bool = False
-    autoMergedChanges: List[Change] = []   # new: changes that were safely merged without user input
+    autoMergedChanges: List[Change] = []    # safe to apply without user review
+    bothDeletedElements: List[str] = []     # deleted on both branches — informational only
