@@ -99,6 +99,18 @@ namespace RevitVersionControl
                     System.Diagnostics.Debug.WriteLine($"Warning: DiffViewerExternalEvent registration failed: {ex.Message}");
                 }
 
+                // Auto-purge stale diff artifacts (red ghosts, the Diff_… view) when a document opens.
+                // Diff sessions are transient by design but DirectShapes are real model elements that
+                // would otherwise survive across save/close/open cycles.
+                try
+                {
+                    application.ControlledApplication.DocumentOpened += OnDocumentOpened_AutoCleanDiff;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Warning: DocumentOpened subscription failed: {ex.Message}");
+                }
+
                 return Result.Succeeded;
             }
             catch (Exception ex)
@@ -110,7 +122,15 @@ namespace RevitVersionControl
 
         public Result OnShutdown(UIControlledApplication application)
         {
+            try { application.ControlledApplication.DocumentOpened -= OnDocumentOpened_AutoCleanDiff; }
+            catch { }
             return Result.Succeeded;
+        }
+
+        private void OnDocumentOpened_AutoCleanDiff(object sender, Autodesk.Revit.DB.Events.DocumentOpenedEventArgs e)
+        {
+            try { Services.DiffViewService.AutoCleanArtifacts(e.Document); }
+            catch { /* never block document open */ }
         }
 
         private PushButton AddPushButton(RibbonPanel panel, string name, string text,
@@ -202,7 +222,8 @@ namespace RevitVersionControl
         }
 
         public void Show(Services.DiffViewBuildResult result) => _pane?.LoadResult(result);
-        public void Clear() => _pane?.Clear();
+        public void ReloadProjects() => _pane?.ReloadProjects();
+        public void Clear() => _pane?.Clear(resetPickers: true);
     }
 
     public class DiffMergePaneProvider : IDockablePaneProvider

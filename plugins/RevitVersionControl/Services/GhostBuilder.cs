@@ -42,13 +42,25 @@ namespace RevitVersionControl.Services
             {
                 IList<GeometryObject> geometry = BuildBoxGeometry(bbox.Min, bbox.Max, materialId);
                 if (geometry == null || geometry.Count == 0)
-                    return new GhostBuildResult { Skipped = true, SkipReason = "geometry build failed" };
+                {
+                    // Last-ditch fallback: render a small line cross at the bbox center so the change is at least visible.
+                    geometry = BuildLineCrossGeometry(bbox.Min, bbox.Max);
+                    if (geometry == null || geometry.Count == 0)
+                        return new GhostBuildResult { Skipped = true, SkipReason = "geometry build failed" };
+                }
 
                 var ds = DirectShape.CreateElement(_doc, new ElementId(BuiltInCategory.OST_GenericModel));
                 if (ds == null)
                     return new GhostBuildResult { Skipped = true, SkipReason = "DirectShape creation failed" };
 
-                ds.SetShape(geometry);
+                try { ds.SetShape(geometry); }
+                catch
+                {
+                    // If SetShape rejects the shell (e.g., self-intersecting fallback mesh), retry with a line cross.
+                    var fallback = BuildLineCrossGeometry(bbox.Min, bbox.Max);
+                    if (fallback != null && fallback.Count > 0)
+                        ds.SetShape(fallback);
+                }
                 ds.Name = $"RVCS Diff Ghost ({kind})";
 
                 TagGhost(ds, sessionId, kind, sourceRepoGuid);
@@ -150,6 +162,29 @@ namespace RevitVersionControl.Services
 
             var result = builder.GetBuildResult();
             return result.GetGeometricalObjects();
+        }
+
+        private static IList<GeometryObject> BuildLineCrossGeometry(XYZ min, XYZ max)
+        {
+            try
+            {
+                XYZ center = (min + max) * 0.5;
+                double dx = Math.Max((max.X - min.X) * 0.5, 0.5);
+                double dy = Math.Max((max.Y - min.Y) * 0.5, 0.5);
+                double dz = Math.Max((max.Z - min.Z) * 0.5, 0.5);
+
+                var lines = new List<GeometryObject>
+                {
+                    Line.CreateBound(center - new XYZ(dx, 0, 0), center + new XYZ(dx, 0, 0)),
+                    Line.CreateBound(center - new XYZ(0, dy, 0), center + new XYZ(0, dy, 0)),
+                    Line.CreateBound(center - new XYZ(0, 0, dz), center + new XYZ(0, 0, dz)),
+                };
+                return lines;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void AddFace(TessellatedShapeBuilder builder, ElementId materialId, params XYZ[] vertices)

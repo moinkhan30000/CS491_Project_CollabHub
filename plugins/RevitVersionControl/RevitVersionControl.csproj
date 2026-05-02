@@ -22,10 +22,14 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="RevitAPI">
-      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <HintPath Condition="Exists('..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll')">..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <HintPath Condition="!Exists('..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="RevitAPIUI">
-      <HintPath>..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <HintPath Condition="Exists('..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll')">..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <HintPath Condition="!Exists('..\..\..\..\Install\Revit\Product\Autodesk\Revit 2026\RevitAPIUI.dll')">$(ProgramFiles)\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
 

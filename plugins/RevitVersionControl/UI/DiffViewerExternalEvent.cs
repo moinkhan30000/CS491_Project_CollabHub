@@ -56,6 +56,14 @@ namespace RevitVersionControl.UI
                 {
                     case DiffViewerOperation.Build:
                         var result = DiffViewService.Build(app, request.BuildRequest);
+                        try
+                        {
+                            if (result != null && result.Success)
+                            {
+                                ShowDiffViewerPane(app, result);
+                            }
+                        }
+                        catch { }
                         try { request.OnBuildComplete?.Invoke(result); }
                         catch { }
                         break;
@@ -88,5 +96,23 @@ namespace RevitVersionControl.UI
         }
 
         public string GetName() => "DiffViewerExternalEvent";
+
+        private static void ShowDiffViewerPane(UIApplication app, DiffViewBuildResult result)
+        {
+            try
+            {
+                var paneId = new Autodesk.Revit.UI.DockablePaneId(RevitVersionControl.DiffViewerPaneProvider.PaneGuid);
+                var pane = app.GetDockablePane(paneId);
+                if (pane != null)
+                {
+                    RevitVersionControl.DiffViewerPaneProvider.Instance?.Show(result);
+                    pane.Show();
+                }
+            }
+            catch
+            {
+                // The pane may not be registered (older startup ordering); fail silently.
+            }
+        }
     }
 }

@@ -289,6 +289,58 @@ namespace RevitVersionControl.Services
             }
         }
 
+        // Auto-clean called on document open. Diff artifacts are designed to be transient — DirectShape
+        // ghosts are real model elements that persist into the .rvt, so without this they survive a save+reopen.
+        // We early-return if nothing needs cleaning so we never dirty a document that has no artifacts.
+        public static void AutoCleanArtifacts(Document doc)
+        {
+            try
+            {
+                if (doc == null || doc.IsFamilyDocument) return;
+
+                // Survey first; only open a transaction if we actually have something to delete.
+                var ghostIds = new List<ElementId>();
+                foreach (var ds in new FilteredElementCollector(doc).OfClass(typeof(DirectShape)).Cast<DirectShape>())
+                {
+                    if (GhostBuilder.IsTaggedGhost(ds, out _, out _, out _))
+                        ghostIds.Add(ds.Id);
+                }
+
+                var viewIds = new List<ElementId>();
+                foreach (var view in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>())
+                {
+                    if (view.IsTemplate) continue;
+                    if (view.Name != null && view.Name.StartsWith(DiffViewNamePrefix, StringComparison.Ordinal))
+                        viewIds.Add(view.Id);
+                }
+
+                if (ghostIds.Count == 0 && viewIds.Count == 0)
+                    return;
+
+                using (var tx = new Transaction(doc, "RVCS Auto-Clean Diff Artifacts"))
+                {
+                    tx.Start();
+                    foreach (var id in ghostIds) { try { doc.Delete(id); } catch { } }
+                    foreach (var id in viewIds) { try { doc.Delete(id); } catch { } }
+                    tx.Commit();
+                }
+
+                // Drop the persisted LastDiffSession so subsequent operations don't try to reuse the
+                // now-deleted view/session ids.
+                try
+                {
+                    var state = DocumentSyncStateService.GetState(doc.PathName);
+                    if (state != null && !string.IsNullOrWhiteSpace(state.ProjectId))
+                        DocumentSyncStateService.SaveDiffSession(doc.PathName, state.ProjectId, 0, Guid.Empty);
+                }
+                catch { }
+            }
+            catch
+            {
+                // Best-effort. Never block the document open path because of this.
+            }
+        }
+
         // ===== Internal helpers =====
 
         private static void ApplyAddedChange(
@@ -325,7 +377,8 @@ namespace RevitVersionControl.Services
             }
 
             row.GhostElementId = ghost.DirectShapeId;
-            ApplyOverride(diffView, ghost.DirectShapeId, DiffViewColors.Added, solidFillId, transparency: 50);
+            // Fully opaque green for added ghosts so they read clearly in shaded mode.
+            ApplyOverride(diffView, ghost.DirectShapeId, DiffViewColors.Added, solidFillId, transparency: 0);
             if (ghost.BoundingBox != null) allBoxes.Add(ghost.BoundingBox);
             row.Note = "Shown as ghost (not present locally).";
         }
@@ -383,7 +436,9 @@ namespace RevitVersionControl.Services
 
             row.GhostElementId = ghost.DirectShapeId;
             var solidFillId2 = DiffViewMaterialCache.GetSolidFillPatternId(doc);
-            ApplyOverride(diffView, ghost.DirectShapeId, DiffViewColors.Deleted, solidFillId2, transparency: 50, dashed: true);
+            // Use 0% transparency (fully opaque red) for deleted ghosts — translucency previously rendered
+            // them too faint against light backgrounds. Dashed projection lines still mark them as ghosts.
+            ApplyOverride(diffView, ghost.DirectShapeId, DiffViewColors.Deleted, solidFillId2, transparency: 0, dashed: true);
             if (ghost.BoundingBox != null) allBoxes.Add(ghost.BoundingBox);
         }
 
@@ -495,7 +550,9 @@ namespace RevitVersionControl.Services
 
         private static View3D EnsureDiffView(Document doc, string baseShort, string targetShort)
         {
-            string viewName = $"{DiffViewNamePrefix}{baseShort}..{targetShort}";
+            // Revit refuses several special characters in view names (`:`, `\`, `/`, etc.).
+            // Use a sanitized name and replace the typical roadmap separators with safe ones.
+            string viewName = SanitizeViewName($"{DiffViewNamePrefix}{baseShort}_to_{targetShort}");
 
             View3D existing = new FilteredElementCollector(doc)
                 .OfClass(typeof(View3D))
@@ -531,6 +588,15 @@ namespace RevitVersionControl.Services
             // 9.10 — do not apply any view template; ensure detail is fine for solid overrides to render.
             try { view.DetailLevel = ViewDetailLevel.Fine; } catch { }
             try { view.DisplayStyle = DisplayStyle.Shading; } catch { }
+
+            // Make sure Generic Models is visible so deleted/added ghosts (DirectShape under OST_GenericModel) render.
+            try
+            {
+                var gm = doc.Settings.Categories.get_Item(BuiltInCategory.OST_GenericModel);
+                if (gm != null && view.GetCategoryHidden(gm.Id))
+                    view.SetCategoryHidden(gm.Id, false);
+            }
+            catch { }
 
             return view;
         }
@@ -646,7 +712,21 @@ namespace RevitVersionControl.Services
                 if (viewId == null || viewId == ElementId.InvalidElementId) return;
                 var view = uiApp.ActiveUIDocument.Document.GetElement(viewId) as View;
                 if (view != null)
+                {
                     uiApp.ActiveUIDocument.ActiveView = view;
+
+                    // After the view is active, frame the camera to fit the full diff (including ghosts
+                    // that may be at locations the user wasn't looking at).
+                    try
+                    {
+                        var uiViews = uiApp.ActiveUIDocument.GetOpenUIViews();
+                        foreach (var uv in uiViews)
+                        {
+                            if (uv.ViewId == view.Id) { uv.ZoomToFit(); break; }
+                        }
+                    }
+                    catch { }
+                }
             }
             catch { }
         }
@@ -655,6 +735,16 @@ namespace RevitVersionControl.Services
         {
             if (string.IsNullOrEmpty(commitId)) return string.Empty;
             return commitId.Length > 7 ? commitId.Substring(0, 7) : commitId;
+        }
+
+        private static string SanitizeViewName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "Diff_View";
+            // Revit forbids these in view names: \ : { } [ ] | ; < > ? ` ~ — replace with underscore.
+            char[] forbidden = { '\\', '/', ':', '{', '}', '[', ']', '|', ';', '<', '>', '?', '`', '~' };
+            foreach (var c in forbidden) name = name.Replace(c, '_');
+            // Collapse leading/trailing whitespace.
+            return name.Trim();
         }
     }
 }

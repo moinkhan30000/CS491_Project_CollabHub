@@ -35,23 +35,12 @@
                             Click="ManageBranchesButton_Click"/>
                     <Button Name="NetworkGraphButton" Content="View Network Graph" Width="130" Height="25" Margin="10,0,0,5"
                             Click="NetworkGraphButton_Click" Background="#4CAF50" Foreground="White" FontWeight="Bold"/>
-                    <Button Name="CompareCommitsButton" Content="Compare Commits" Width="130" Height="25" Margin="10,0,0,5"
-                            Click="CompareCommitsButton_Click" IsEnabled="False"
-                            ToolTip="Select two commits on the same branch to compare."/>
                 </WrapPanel>
             </StackPanel>
         </Border>
 
         <!-- Commit List -->
-        <ListView Grid.Row="1" x:Name="CommitListView" BorderThickness="0"
-                  SelectionMode="Extended"
-                  SelectionChanged="CommitListView_SelectionChanged">
-            <ListView.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="Compare to parent" Click="CompareToParent_Click"/>
-                    <MenuItem Header="Compare to..." Click="CompareToOther_Click"/>
-                </ContextMenu>
-            </ListView.ContextMenu>
+        <ListView Grid.Row="1" x:Name="CommitListView" BorderThickness="0">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Commit" Width="250">

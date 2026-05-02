@@ -23,6 +23,7 @@ namespace RevitVersionControl.Commands
                     Application.SetLoggedInState(false);
                     HistoryPaneProvider.Instance?.Clear();
                     DiffMergePaneProvider.Instance?.Clear();
+                    DiffViewerPaneProvider.Instance?.Clear();
                     TaskDialog.Show("Logged Out", "You have been logged out successfully.");
                 }
                 else
@@ -32,6 +33,7 @@ namespace RevitVersionControl.Commands
                     {
                         Application.SetLoggedInState(true);
                         HistoryPaneProvider.Instance?.ReloadProjects();
+                        DiffViewerPaneProvider.Instance?.ReloadProjects();
                         TaskDialog.Show("Success", "Logged in successfully!");
                     }
                 }
@@ -63,6 +65,7 @@ namespace RevitVersionControl.Commands
                 {
                     Application.SetLoggedInState(true);
                     HistoryPaneProvider.Instance?.ReloadProjects();
+                    DiffViewerPaneProvider.Instance?.ReloadProjects();
                     TaskDialog.Show("Success", "Account created and logged in!");
                 }
                 return Result.Succeeded;
@@ -397,6 +400,14 @@ namespace RevitVersionControl.Commands
                 UIApplication uiApp = commandData.Application;
                 Document doc = uiApp.ActiveUIDocument.Document;
 
+                // Roadmap §9.16 — clear any active diff session before pulling so stale ghosts/overrides don't pollute the model.
+                try
+                {
+                    DiffViewService.ClearActiveDiff(uiApp);
+                    DiffViewerPaneProvider.Instance?.Clear();
+                }
+                catch { }
+
                 var pullDialog = new PullDialog(doc.PathName, doc.IsModified);
                 var result = pullDialog.ShowDialog();
 
@@ -592,79 +603,31 @@ namespace RevitVersionControl.Commands
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             if (!ApiClient.Instance.IsLoggedIn)
+            {
+                TaskDialog.Show("Authentication Required", "Please log in to use this feature.");
                 return Result.Cancelled;
+            }
 
             try
             {
-                var diffDialog = new DiffSelectDialog();
-                var result = diffDialog.ShowDialog();
-
-                if (result != true)
-                    return Result.Cancelled;
-
-                string baseCommit = diffDialog.BaseCommitId;
-                string targetCommit = diffDialog.TargetCommitId;
-                string projectId = diffDialog.ProjectId;
-
-                if (baseCommit == targetCommit)
+                // The View Diff button is now just a launcher for the Commit Diff Viewer pane,
+                // which holds its own project / branch / base / target pickers and the Compare button.
+                var paneId = new DockablePaneId(DiffViewerPaneProvider.PaneGuid);
+                DockablePane pane = commandData.Application.GetDockablePane(paneId);
+                if (pane != null)
                 {
-                    TaskDialog.Show("No Differences", "Base and target commits are the same.");
+                    DiffViewerPaneProvider.Instance?.ReloadProjects();
+                    pane.Show();
                     return Result.Succeeded;
                 }
 
-                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
-
-                DiffResult diffResult = null;
-                try
-                {
-                    var diffTask = Task.Run(async () =>
-                        await ApiClient.Instance.GetDiffAsync(projectId, baseCommit, targetCommit));
-                    diffResult = diffTask.GetAwaiter().GetResult();
-                }
-                finally
-                {
-                    System.Windows.Input.Mouse.OverrideCursor = null;
-                }
-
-                if (diffResult == null)
-                {
-                    var errorDetail = string.IsNullOrWhiteSpace(ApiClient.Instance.LastError)
-                        ? "Failed to compute diff."
-                        : $"Failed to compute diff.\n\n{ApiClient.Instance.LastError}";
-                    TaskDialog.Show("Error", errorDetail);
-                    return Result.Failed;
-                }
-
-                if (diffResult.Summary != null &&
-                    diffResult.Summary.TryGetValue("total", out int totalChanges) &&
-                    totalChanges == 0)
-                {
-                    TaskDialog.Show("No Differences", "No changes found between the selected commits.");
-                    return Result.Succeeded;
-                }
-
-                var paneId = new DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
-                DockablePane diffPane = commandData.Application.GetDockablePane(paneId);
-
-                if (diffPane != null)
-                {
-                    DiffMergePaneProvider.Instance?.LoadDiffResult(diffResult);
-                    diffPane.Show();
-                }
-
-                TaskDialog.Show("Diff Results",
-                    $"Added: {diffResult.Summary["added"]}\n" +
-                    $"Modified: {diffResult.Summary["modified"]}\n" +
-                    $"Deleted: {diffResult.Summary["deleted"]}\n\n" +
-                    "Results loaded in the Changes & Merge pane.");
-
-                return Result.Succeeded;
+                TaskDialog.Show("Error", "Commit Diff Viewer pane is not registered. Try restarting Revit.");
+                return Result.Failed;
             }
             catch (Exception ex)
             {
-                System.Windows.Input.Mouse.OverrideCursor = null;
                 message = ex.Message;
-                TaskDialog.Show("Error", $"Failed to compute diff: {ex.Message}");
+                TaskDialog.Show("Error", $"Failed to open Commit Diff Viewer: {ex.Message}");
                 return Result.Failed;
             }
         }
