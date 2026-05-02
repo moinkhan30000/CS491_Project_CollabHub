@@ -1,0 +1,139 @@
+<Page x:Class="RevitVersionControl.UI.DiffViewerPane"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="Commit Diff Viewer">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <Border Grid.Row="0" Background="#2D2D30" Padding="10,8">
+            <StackPanel>
+                <TextBlock Text="Commit Diff Viewer" FontSize="16" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="StatusBanner" Text="" Foreground="#FFD700" FontStyle="Italic"
+                           Margin="0,4,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+                <TextBlock x:Name="ActiveDiffText" Text="" Foreground="#9CDCFE" Margin="0,2,0,0" Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Pickers -->
+        <Border Grid.Row="1" Background="#3C3C3C" Padding="10">
+            <StackPanel>
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Project:" Foreground="White" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="1" x:Name="ProjectComboBox" Height="24"
+                              DisplayMemberPath="Name"
+                              SelectionChanged="ProjectComboBox_SelectionChanged"/>
+                </Grid>
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Branch:" Foreground="White" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="1" x:Name="BranchComboBox" Height="24"
+                              DisplayMemberPath="Name"
+                              SelectionChanged="BranchComboBox_SelectionChanged"/>
+                </Grid>
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Base:" Foreground="White" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="1" x:Name="BaseCommitComboBox" Height="24"
+                              DisplayMemberPath="DisplayText"
+                              SelectionChanged="CommitComboBox_SelectionChanged"/>
+                </Grid>
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Target:" Foreground="White" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="1" x:Name="TargetCommitComboBox" Height="24"
+                              DisplayMemberPath="DisplayText"
+                              SelectionChanged="CommitComboBox_SelectionChanged"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="RefreshButton" Content="Refresh" Width="80" Height="26"
+                            Margin="0,0,8,0" Click="RefreshButton_Click"/>
+                    <Button x:Name="CompareButton" Content="Compare" Width="100" Height="26"
+                            Background="#28A745" Foreground="White" FontWeight="Bold"
+                            IsEnabled="False" Click="CompareButton_Click"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Summary + filters -->
+        <Border Grid.Row="2" Background="#F0F0F0" Padding="10" BorderThickness="0,0,0,1" BorderBrush="#CCC">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Text="Δ " FontWeight="Bold"/>
+                    <TextBlock x:Name="AddedCountText" Text="0 added" Foreground="#00C853" FontWeight="Bold" Margin="0,0,10,0"/>
+                    <TextBlock Text="·" Foreground="Gray" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="ModifiedCountText" Text="0 modified" Foreground="#B58900" FontWeight="Bold" Margin="0,0,10,0"/>
+                    <TextBlock Text="·" Foreground="Gray" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="DeletedCountText" Text="0 deleted" Foreground="#D50000" FontWeight="Bold"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Show: " VerticalAlignment="Center"/>
+                    <CheckBox x:Name="FilterAdded" Content="Added" IsChecked="True" Margin="5,0" Click="Filter_Click"/>
+                    <CheckBox x:Name="FilterModified" Content="Modified" IsChecked="True" Margin="5,0" Click="Filter_Click"/>
+                    <CheckBox x:Name="FilterDeleted" Content="Deleted" IsChecked="True" Margin="5,0" Click="Filter_Click"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Rows -->
+        <ListView Grid.Row="3" x:Name="RowsListView" BorderThickness="0">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="" Width="50">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Background="{Binding StatusBrush}" CornerRadius="3" Padding="5,2">
+                                    <TextBlock Text="{Binding ShortType}" Foreground="White" FontSize="10"
+                                               HorizontalAlignment="Center"/>
+                                </Border>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Category" Width="120" DisplayMemberBinding="{Binding Category}"/>
+                    <GridViewColumn Header="Type" Width="160" DisplayMemberBinding="{Binding TypeName}"/>
+                    <GridViewColumn Header="Repo" Width="80" DisplayMemberBinding="{Binding ShortRepoGuid}"/>
+                    <GridViewColumn Header="Note" Width="220" DisplayMemberBinding="{Binding Note}"/>
+                    <GridViewColumn Header="" Width="80">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="Zoom To" Padding="3,1" Click="ZoomTo_Click"
+                                        Tag="{Binding}" IsEnabled="{Binding HasGeometry}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- Footer -->
+        <Border Grid.Row="4" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CleanOrphansButton" Content="Clean Orphans" Width="120" Height="28"
+                        Margin="0,0,8,0" Click="CleanOrphans_Click"
+                        ToolTip="Remove every diff view and ghost from the document."/>
+                <Button x:Name="ClearDiffButton" Content="Clear Diff View" Width="130" Height="28"
+                        Background="#D50000" Foreground="White" FontWeight="Bold"
+                        Click="ClearDiff_Click"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Page>

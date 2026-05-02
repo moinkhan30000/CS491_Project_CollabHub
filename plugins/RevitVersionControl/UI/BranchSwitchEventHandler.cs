@@ -27,9 +27,17 @@ namespace RevitVersionControl.UI
         public void Execute(UIApplication app)
         {
             if (_request == null) return;
-            
+
             try
             {
+                // Auto-clear any active diff session before mutating the document (roadmap §9.16).
+                try
+                {
+                    DiffViewService.ClearActiveDiff(app);
+                    RevitVersionControl.DiffViewerPaneProvider.Instance?.Clear();
+                }
+                catch { }
+
                 Document doc = app.ActiveUIDocument.Document;
                 string projectId = _request.ProjectId;
                 string currentCommit = _request.CurrentCommitId;

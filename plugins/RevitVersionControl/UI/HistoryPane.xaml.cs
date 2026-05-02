@@ -75,19 +75,19 @@ namespace RevitVersionControl.UI
             {
                 BranchComboBox.IsEnabled = false;
                 var branches = await _apiClient.GetBranchesAsync(projectId);
-                
+
                 var allBranches = new List<Branch> { new Branch { Name = "All Branches" } };
                 allBranches.AddRange(branches);
-                
+
                 BranchComboBox.ItemsSource = allBranches;
                 BranchComboBox.DisplayMemberPath = "Name";
-                
+
                 if (allBranches.Count > 0)
                 {
                     BranchComboBox.SelectedIndex = 0;
                 }
             }
-            catch (Exception ex)
+            catch
             {
                 // Ignore silent load failures for branches
             }
@@ -123,7 +123,7 @@ namespace RevitVersionControl.UI
                     {
                         var branchCommits = new List<Commit>();
                         var commitMap = commits.ToDictionary(c => c.CommitId, StringComparer.OrdinalIgnoreCase);
-                        
+
                         string currentId = selectedBranch.HeadCommitId;
                         while (!string.IsNullOrEmpty(currentId) && commitMap.TryGetValue(currentId, out Commit currentCommit))
                         {
@@ -202,8 +202,8 @@ namespace RevitVersionControl.UI
             if (ProjectComboBox.SelectedItem is Project project)
             {
                 var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
-                CurrentTrackedBranchText.Text = hint != null && !string.IsNullOrWhiteSpace(hint.CurrentBranchName) 
-                    ? $"Active Branch: {hint.CurrentBranchName}" 
+                CurrentTrackedBranchText.Text = hint != null && !string.IsNullOrWhiteSpace(hint.CurrentBranchName)
+                    ? $"Active Branch: {hint.CurrentBranchName}"
                     : "Active Branch: none";
 
                 await LoadBranchesAsync(project.ProjectId);
@@ -225,7 +225,7 @@ namespace RevitVersionControl.UI
             {
                 var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
                 string currentCommitId = hint?.CurrentCommitId;
-                
+
                 var dialog = new BranchManagerDialog(project.ProjectId, project.Name, currentCommitId);
                 if (dialog.ShowDialog() == true)
                 {
@@ -235,7 +235,7 @@ namespace RevitVersionControl.UI
                         await LoadBranchesAsync(project.ProjectId);
                         var branches = BranchComboBox.ItemsSource as List<Branch>;
                         var b = branches?.FirstOrDefault(x => string.Equals(x.Name, targetBranch, StringComparison.OrdinalIgnoreCase));
-                        
+
                         if (b != null)
                         {
                             if (!string.IsNullOrWhiteSpace(b.HeadCommitId) && b.HeadCommitId != currentCommitId)
@@ -270,7 +270,7 @@ namespace RevitVersionControl.UI
                                     CurrentTrackedBranchText.Text = $"Active Branch: {targetBranch}";
                                 }
                             }
-                            
+
                             BranchComboBox.SelectedItem = b;
                             await LoadCommitsAsync(project.ProjectId);
                         }
@@ -289,7 +289,7 @@ namespace RevitVersionControl.UI
             {
                 var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
                 string currentCommitId = hint?.CurrentCommitId;
-                
+
                 var dialog = new NetworkGraphWindow(project.ProjectId, project.Name, currentCommitId);
                 dialog.ShowDialog();
             }
