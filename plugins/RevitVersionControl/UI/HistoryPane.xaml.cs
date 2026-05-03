@@ -298,12 +298,31 @@ namespace RevitVersionControl.UI
                                         DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, project.ProjectId, hint.ModelId, currentCommitId, hint.CurrentBranchName, targetBranchObj.HeadCommitId);
                                     }
                                     
-                                    DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
-                                    
-                                    string conflictMsg = mergeResult.HasConflicts 
-                                        ? $"\n\n{mergeResult.Conflicts.Count} CONFLICT(S) detected! Resolve them in the merge pane."
-                                        : "";
-                                    MessageBox.Show($"3-way merge analysis loaded into Changes & Merge Pane.{conflictMsg}\nPlease open it to review and finalize.", "Merge Initiated", MessageBoxButton.OK, MessageBoxImage.Information);
+                                    if (mergeResult.HasConflicts)
+                                    {
+                                        DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
+                                        DiffMergePaneProvider.Instance?.SetMode(DiffMergeMode.Resolution);
+                                        MessageBox.Show($"3-way merge analysis loaded into Changes & Merge Pane.\n\n{mergeResult.Conflicts.Count} CONFLICT(S) detected! Please open the pane to review and finalize.", "Merge Initiated", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                    }
+                                    else
+                                    {
+                                        var previewResult = MessageBox.Show(
+                                            "Merge successful without conflicts.\nWould you like to review the changes in the 3D viewer before applying?", 
+                                            "Merge Complete", 
+                                            MessageBoxButton.YesNo, 
+                                            MessageBoxImage.Question);
+
+                                        if (previewResult == MessageBoxResult.Yes)
+                                        {
+                                            DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
+                                            DiffMergePaneProvider.Instance?.SetMode(DiffMergeMode.ViewOnly);
+                                            MessageBox.Show("Changes loaded into the Changes & Merge Pane in View Only mode.", "Preview Ready", MessageBoxButton.OK, MessageBoxImage.Information);
+                                        }
+                                        else
+                                        {
+                                            DiffMergePaneProvider.Instance?.AutoFinalizeCleanMerge(mergeResult, project.ProjectId, targetBranchObj.HeadCommitId, hint?.ModelId);
+                                        }
+                                    }
                                 }
                             }
                             catch (Exception ex)

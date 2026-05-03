@@ -81,7 +81,8 @@ async def init_project(
         change_type="ADD",
         snapshot=initial_snapshot,
         element_count=len(initial_snapshot.elements),
-        changed_elements=len(initial_snapshot.elements)
+        changed_elements=len(initial_snapshot.elements),
+        branch_name="main"
     )
 
     branch_repo.create_branch(

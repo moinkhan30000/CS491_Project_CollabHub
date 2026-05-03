@@ -10,6 +10,12 @@ using Autodesk.Revit.UI;
 
 namespace RevitVersionControl.UI
 {
+    public enum DiffMergeMode
+    {
+        Resolution,
+        ViewOnly
+    }
+
     public partial class DiffMergePane : Page
     {
         private List<Change> _currentChanges = new List<Change>();
@@ -35,6 +41,8 @@ namespace RevitVersionControl.UI
         private bool _isPreviewing = false;
         private bool _isMergeMode = false;
         private List<Conflict> _currentConflicts = new List<Conflict>();
+        
+        public DiffMergeMode CurrentMode { get; private set; } = DiffMergeMode.Resolution;
 
         public DiffMergePane()
         {
@@ -59,6 +67,15 @@ namespace RevitVersionControl.UI
         /// <summary>Show/hide the Start Visual Merge button based on merge mode.</summary>
         private void UpdateMergeButtonVisibility()
         {
+            if (CurrentMode == DiffMergeMode.ViewOnly)
+            {
+                StartMergeButton.IsEnabled = false;
+                StartMergeButton.Visibility = Visibility.Collapsed;
+                ApplyMergeButton.IsEnabled = false;
+                ApplyMergeButton.Visibility = Visibility.Collapsed;
+                return;
+            }
+
             if (_isMergeMode && _currentChanges.Count > 0)
             {
                 StartMergeButton.IsEnabled = true;
@@ -184,6 +201,7 @@ namespace RevitVersionControl.UI
             _currentTargetCommitId = null;
             _currentModelId = null;
             _isMergeMode = false;
+            CurrentMode = DiffMergeMode.Resolution;
             
             SetPreviewMode(false);
             UpdateMergeButtonVisibility();
@@ -358,11 +376,27 @@ namespace RevitVersionControl.UI
                     {
                         if (item.IsSelected)
                         {
-                            var change = _currentChanges.FirstOrDefault(c => c.ElementId == item.ElementId);
-                            if (change != null)
+                            bool shouldAccept = true;
+                            if (item.IsConflict)
                             {
-                                string key = PreviewStateService.GetChangeTrackingKey(change);
-                                if (!string.IsNullOrEmpty(key)) acceptedKeys.Add(key);
+                                string conflictId = item.ConflictId ?? item.ElementId;
+                                if (PreviewStateService.ConflictResolutions.TryGetValue(conflictId, out string res))
+                                {
+                                    if (res == "keep_local")
+                                    {
+                                        shouldAccept = false;
+                                    }
+                                }
+                            }
+
+                            if (shouldAccept)
+                            {
+                                var change = _currentChanges.FirstOrDefault(c => c.ElementId == item.ElementId);
+                                if (change != null)
+                                {
+                                    string key = PreviewStateService.GetChangeTrackingKey(change);
+                                    if (!string.IsNullOrEmpty(key)) acceptedKeys.Add(key);
+                                }
                             }
                         }
                     }
@@ -385,6 +419,40 @@ namespace RevitVersionControl.UI
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to finalize merge: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        public void AutoFinalizeCleanMerge(Merge3WayResult result, string projectId, string targetCommitId, string modelId)
+        {
+            try
+            {
+                var acceptedKeys = new List<string>();
+                if (result.TargetChanges != null)
+                {
+                    foreach (var change in result.TargetChanges)
+                    {
+                        string key = PreviewStateService.GetChangeTrackingKey(change);
+                        if (!string.IsNullOrEmpty(key)) acceptedKeys.Add(key);
+                    }
+                }
+
+                _finalizeHandler.Queue(new DiffMergeFinalizeRequest
+                {
+                    IsCancelled = false,
+                    OriginalRequest = new DiffMergeApplyRequest
+                    {
+                        ProjectId = projectId,
+                        TargetCommitId = targetCommitId,
+                        ModelId = modelId,
+                        Changes = new List<Change>(result.TargetChanges ?? new List<Change>())
+                    },
+                    AcceptedChangeKeys = acceptedKeys
+                });
+                _finalizeExternalEvent.Raise();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to auto-finalize merge: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -719,11 +787,35 @@ namespace RevitVersionControl.UI
             {
                 PreviewActionPanel.Visibility = Visibility.Visible;
                 ListActionPanel.Visibility = Visibility.Collapsed;
+                
+                // Disable resolution buttons if in ViewOnly mode
+                if (CurrentMode == DiffMergeMode.ViewOnly)
+                {
+                    KeepLocalButton.Visibility = Visibility.Collapsed;
+                    AcceptRemoteButton.Visibility = Visibility.Collapsed;
+                    KeepBothButton.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    KeepLocalButton.Visibility = Visibility.Visible;
+                    AcceptRemoteButton.Visibility = Visibility.Visible;
+                    KeepBothButton.Visibility = Visibility.Visible;
+                }
             }
             else
             {
                 PreviewActionPanel.Visibility = Visibility.Collapsed;
                 ListActionPanel.Visibility = Visibility.Visible;
+            }
+        }
+
+        public void SetMode(DiffMergeMode mode)
+        {
+            CurrentMode = mode;
+            UpdateMergeButtonVisibility();
+            if (ChangesListView.ItemsSource != null)
+            {
+                SetPreviewMode(PreviewActionPanel.Visibility == Visibility.Visible);
             }
         }
 

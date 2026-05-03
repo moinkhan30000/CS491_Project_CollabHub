@@ -173,6 +173,24 @@ namespace RevitVersionControl.UI
                         catch { ghostFailed++; }
                     }
 
+                    // --- 4.5 Create REMOTE GHOST elements for MODIFIED conflicts ---
+                    var modifiedConflicts = request.Changes.Where(c => c.ChangeType == "modified" && PreviewStateService.ActiveConflicts != null && PreviewStateService.ActiveConflicts.Any(conf => conf.ElementId == c.ElementId || conf.ElementId == c.RepoGuid)).ToList();
+                    foreach (var change in modifiedConflicts)
+                    {
+                        try
+                        {
+                            string trackingKey = PreviewStateService.GetChangeTrackingKey(change);
+                            if (string.IsNullOrEmpty(trackingKey)) continue;
+                            
+                            string remoteKey = trackingKey + "_remote";
+                            if (CreateGhostDirectShape(doc, change, remoteKey, useNewData: true))
+                                ghostCreated++;
+                            else
+                                ghostFailed++;
+                        }
+                        catch { ghostFailed++; }
+                    }
+
                     // --- 5. Apply Graphic Overrides ---
                     Color colorAdded = new Color(0, 200, 0);        // Green
                     Color colorModified = new Color(255, 165, 0);   // Orange
@@ -219,6 +237,33 @@ namespace RevitVersionControl.UI
                             {
                                 targetId = el.Id;
                                 color = colorModified;
+                                
+                                string remoteKey = trackingKey + "_remote";
+                                if (PreviewStateService.TempGhostElements.TryGetValue(remoteKey, out ElementId remoteGhostId))
+                                {
+                                    try
+                                    {
+                                        OverrideGraphicSettings ogsRemote = new OverrideGraphicSettings();
+                                        ogsRemote.SetProjectionLineColor(colorConflict);
+                                        ogsRemote.SetProjectionLineWeight(5);
+                                        ogsRemote.SetSurfaceForegroundPatternColor(colorConflict);
+                                        ogsRemote.SetSurfaceBackgroundPatternColor(colorConflict);
+                                        ogsRemote.SetCutForegroundPatternColor(colorConflict);
+                                        ogsRemote.SetCutBackgroundPatternColor(colorConflict);
+                                        if (solidFill != null)
+                                        {
+                                            ogsRemote.SetSurfaceForegroundPatternId(solidFill.Id);
+                                            ogsRemote.SetSurfaceBackgroundPatternId(solidFill.Id);
+                                            ogsRemote.SetCutForegroundPatternId(solidFill.Id);
+                                            ogsRemote.SetCutBackgroundPatternId(solidFill.Id);
+                                        }
+                                        ogsRemote.SetSurfaceTransparency(50);
+                                        previewView.SetElementOverrides(remoteGhostId, ogsRemote);
+                                        colorApplied++;
+                                        transparency = 50; // Make the real element 50% transparent too so both can be seen
+                                    }
+                                    catch { }
+                                }
                             }
                         }
                         else if (change.ChangeType == "deleted")
@@ -382,24 +427,74 @@ namespace RevitVersionControl.UI
         /// <summary>
         /// Creates a DirectShape box at the element's last known location.
         /// </summary>
-        private static bool CreateGhostDirectShape(Document doc, Change change, string trackingKey)
+        private static bool CreateGhostDirectShape(Document doc, Change change, string trackingKey, bool useNewData = false)
         {
             try
             {
-                XYZ location = ExtractLocation(change.OldData);
-                if (location == null) return false;
+                XYZ min = null;
+                XYZ max = null;
 
-                double half = 0.5;
+                var dataToExtract = useNewData ? change.NewData : change.OldData;
+
+                // Try to extract exact BoundingBox from JSON data first
+                if (dataToExtract != null && dataToExtract.ContainsKey("geometry") && dataToExtract["geometry"] is Newtonsoft.Json.Linq.JObject geom)
+                {
+                    if (geom.ContainsKey("boundingBox") && geom["boundingBox"] is Newtonsoft.Json.Linq.JObject bbox)
+                    {
+                        var minJ = bbox["min"] as Newtonsoft.Json.Linq.JObject;
+                        var maxJ = bbox["max"] as Newtonsoft.Json.Linq.JObject;
+                        if (minJ != null && maxJ != null)
+                        {
+                            min = new XYZ(minJ["x"].Value<double>(), minJ["y"].Value<double>(), minJ["z"].Value<double>());
+                            max = new XYZ(maxJ["x"].Value<double>(), maxJ["y"].Value<double>(), maxJ["z"].Value<double>());
+                        }
+                    }
+                }
+
+                // If BoundingBox not found in JSON, use the real element if NOT using NewData
+                if ((min == null || max == null) && !useNewData)
+                {
+                    Element realElement = null;
+                    if (!string.IsNullOrEmpty(change.RepoGuid))
+                        realElement = RepoGuidService.FindElement(doc, change.RepoGuid, change.ElementId);
+                    
+                    if (realElement == null && !string.IsNullOrEmpty(change.ElementId))
+                    {
+                        try { realElement = doc.GetElement(change.ElementId); } catch { }
+                    }
+
+                    if (realElement != null)
+                    {
+                        BoundingBoxXYZ bbox = realElement.get_BoundingBox(null);
+                        if (bbox != null)
+                        {
+                            min = bbox.Min;
+                            max = bbox.Max;
+                        }
+                    }
+                }
+
+                // Fallback to Location if real element not found or has no bbox
+                if (min == null || max == null)
+                {
+                    XYZ location = ExtractLocation(dataToExtract);
+                    if (location == null) return false;
+
+                    double half = 1.0; // Slightly larger fallback box
+                    min = new XYZ(location.X - half, location.Y - half, location.Z - half);
+                    max = new XYZ(location.X + half, location.Y + half, location.Z + half);
+                }
+
                 var points = new List<XYZ>
                 {
-                    new XYZ(location.X - half, location.Y - half, location.Z - half),
-                    new XYZ(location.X + half, location.Y - half, location.Z - half),
-                    new XYZ(location.X + half, location.Y + half, location.Z - half),
-                    new XYZ(location.X - half, location.Y + half, location.Z - half),
-                    new XYZ(location.X - half, location.Y - half, location.Z + half),
-                    new XYZ(location.X + half, location.Y - half, location.Z + half),
-                    new XYZ(location.X + half, location.Y + half, location.Z + half),
-                    new XYZ(location.X - half, location.Y + half, location.Z + half),
+                    new XYZ(min.X, min.Y, min.Z),
+                    new XYZ(max.X, min.Y, min.Z),
+                    new XYZ(max.X, max.Y, min.Z),
+                    new XYZ(min.X, max.Y, min.Z),
+                    new XYZ(min.X, min.Y, max.Z),
+                    new XYZ(max.X, min.Y, max.Z),
+                    new XYZ(max.X, max.Y, max.Z),
+                    new XYZ(min.X, max.Y, max.Z),
                 };
 
                 var builder = new TessellatedShapeBuilder();

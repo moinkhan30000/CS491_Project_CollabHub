@@ -99,8 +99,9 @@ namespace RevitVersionControl.UI
             for (int i = 0; i < request.AllChanges.Count; i++)
             {
                 var change = request.AllChanges[i];
-                ElementId elemId = ResolveElementId(doc, change);
-                if (elemId == ElementId.InvalidElementId) continue;
+                var ids = ResolveBothElementIds(doc, change);
+                ElementId elemId = ids.RealId != ElementId.InvalidElementId ? ids.RealId : ids.GhostId;
+                if (elemId == ElementId.InvalidElementId && ids.GhostId == ElementId.InvalidElementId) continue;
 
                 bool isCurrent = (i == request.CurrentIndex);
                 bool isIncluded = request.IncludedStates != null &&
@@ -108,14 +109,18 @@ namespace RevitVersionControl.UI
                                   request.IncludedStates[i];
 
                 // Determine the base color
-                Color baseColor;
+                Color baseColor = colorModified;
                 int transparency = 0;
+                
+                bool showReal = true;
+                bool showGhost = true;
 
                 if (!isIncluded)
                 {
                     // Excluded: gray + very transparent
                     baseColor = colorExcluded;
                     transparency = 80;
+                    if (change.ChangeType == "deleted") { showReal = true; showGhost = false; }
                 }
                 else
                 {
@@ -129,9 +134,42 @@ namespace RevitVersionControl.UI
                             request.ConflictResolutions.TryGetValue(change.ElementId ?? "", out conflictRes);
                     }
 
-                    if (conflictRes == "keep_local" || conflictRes == "accept_remote")
+                    if (conflictRes == "keep_local")
                     {
-                        baseColor = conflictRes == "keep_local" ? colorKeepOurs : colorKeepTheirs;
+                        baseColor = colorKeepOurs;
+                        if (change.ChangeType == "added")
+                        {
+                            transparency = 100; // Make invisible
+                            baseColor = new Color(255, 255, 255); // White/transparent
+                        }
+                        else if (change.ChangeType == "deleted")
+                        {
+                            showReal = true; // Show the real element
+                            showGhost = false; // Hide the ghost
+                            transparency = 0; // Solid
+                        }
+                        else if (change.ChangeType == "modified")
+                        {
+                            showReal = true;
+                            showGhost = false;
+                            transparency = 0;
+                        }
+                    }
+                    else if (conflictRes == "accept_remote")
+                    {
+                        baseColor = colorKeepTheirs;
+                        if (change.ChangeType == "deleted")
+                        {
+                            showReal = false; // Hide the real element
+                            showGhost = true; // Show the ghost
+                            transparency = 70;
+                        }
+                        else if (change.ChangeType == "modified")
+                        {
+                            showReal = false;
+                            showGhost = true;
+                            transparency = 0; // Make ghost solid to represent chosen remote state
+                        }
                     }
                     else
                     {
@@ -139,100 +177,163 @@ namespace RevitVersionControl.UI
                         switch (change.ChangeType)
                         {
                             case "added":    baseColor = colorAdded; break;
-                            case "modified": baseColor = colorModified; break;
-                            case "deleted":  baseColor = colorDeleted; transparency = 70; break;
+                            case "modified": 
+                                baseColor = colorModified; 
+                                bool isConflict = PreviewStateService.ActiveConflicts != null && 
+                                    PreviewStateService.ActiveConflicts.Any(conf => conf.ElementId == change.ElementId || conf.ElementId == change.RepoGuid);
+                                if (isConflict)
+                                {
+                                    showReal = true;
+                                    showGhost = true;
+                                    transparency = 50; // Both visible, transparent overlapping!
+                                }
+                                break;
+                            case "deleted":  
+                                baseColor = colorDeleted; 
+                                transparency = 70; 
+                                showReal = false; // Hide real element
+                                showGhost = true; // Show ghost
+                                break;
                             default:         baseColor = colorModified; break;
                         }
                     }
                 }
 
-                // Apply override
-                OverrideGraphicSettings ogs = new OverrideGraphicSettings();
-
-                if (isCurrent)
+                // Apply to Real Element
+                if (ids.RealId != ElementId.InvalidElementId)
                 {
-                    // Current element: use cyan/highlight outline + base fill
-                    ogs.SetProjectionLineColor(colorHighlight);
-                    ogs.SetProjectionLineWeight(8);
-                    ogs.SetSurfaceForegroundPatternColor(baseColor);
-                    ogs.SetSurfaceBackgroundPatternColor(baseColor);
-                    ogs.SetCutForegroundPatternColor(baseColor);
-                    ogs.SetCutBackgroundPatternColor(baseColor);
-                }
-                else
-                {
-                    // Non-current: base color everywhere
-                    ogs.SetProjectionLineColor(baseColor);
-                    ogs.SetProjectionLineWeight(3);
-                    ogs.SetSurfaceForegroundPatternColor(baseColor);
-                    ogs.SetSurfaceBackgroundPatternColor(baseColor);
-                    ogs.SetCutForegroundPatternColor(baseColor);
-                    ogs.SetCutBackgroundPatternColor(baseColor);
+                    OverrideGraphicSettings ogs = new OverrideGraphicSettings();
+                    if (!showReal)
+                    {
+                        ogs.SetSurfaceTransparency(100);
+                        ogs.SetProjectionLineColor(new Color(255, 255, 255));
+                    }
+                    else
+                    {
+                        ApplyColorOverrides(ogs, baseColor, solidFill, isCurrent, transparency, colorHighlight);
+                    }
+                    try { view.SetElementOverrides(ids.RealId, ogs); } catch { }
                 }
 
-                if (solidFill != null)
+                // Apply to Ghost Element
+                if (ids.GhostId != ElementId.InvalidElementId)
                 {
-                    ogs.SetSurfaceForegroundPatternId(solidFill.Id);
-                    ogs.SetSurfaceBackgroundPatternId(solidFill.Id);
-                    ogs.SetCutForegroundPatternId(solidFill.Id);
-                    ogs.SetCutBackgroundPatternId(solidFill.Id);
+                    OverrideGraphicSettings ogs = new OverrideGraphicSettings();
+                    if (!showGhost)
+                    {
+                        ogs.SetSurfaceTransparency(100);
+                        ogs.SetProjectionLineColor(new Color(255, 255, 255));
+                    }
+                    else
+                    {
+                        Color ghostColor = (change.ChangeType == "modified" && showReal) ? new Color(255, 0, 255) : baseColor;
+                        ApplyColorOverrides(ogs, ghostColor, solidFill, isCurrent, transparency, colorHighlight);
+                    }
+                    try { view.SetElementOverrides(ids.GhostId, ogs); } catch { }
                 }
-
-                if (transparency > 0)
-                    ogs.SetSurfaceTransparency(transparency);
-
-                try { view.SetElementOverrides(elemId, ogs); } catch { }
             }
         }
 
-        /// <summary>
-        /// Resolve a Change to its Revit ElementId in the current model.
-        /// Checks temp added, ghost, RepoGuid, UniqueId, and numeric ID.
-        /// </summary>
-        private static ElementId ResolveElementId(Document doc, Change change)
+        private void ApplyColorOverrides(OverrideGraphicSettings ogs, Color baseColor, FillPatternElement solidFill, bool isCurrent, int transparency, Color colorHighlight)
         {
-            if (change == null) return ElementId.InvalidElementId;
+            if (isCurrent)
+            {
+                ogs.SetProjectionLineColor(colorHighlight);
+                ogs.SetProjectionLineWeight(8);
+            }
+            else
+            {
+                ogs.SetProjectionLineColor(baseColor);
+                ogs.SetProjectionLineWeight(3);
+            }
+
+            ogs.SetSurfaceForegroundPatternColor(baseColor);
+            ogs.SetSurfaceBackgroundPatternColor(baseColor);
+            ogs.SetCutForegroundPatternColor(baseColor);
+            ogs.SetCutBackgroundPatternColor(baseColor);
+
+            if (solidFill != null)
+            {
+                ogs.SetSurfaceForegroundPatternId(solidFill.Id);
+                ogs.SetSurfaceBackgroundPatternId(solidFill.Id);
+                ogs.SetCutForegroundPatternId(solidFill.Id);
+                ogs.SetCutBackgroundPatternId(solidFill.Id);
+            }
+
+            if (transparency > 0)
+                ogs.SetSurfaceTransparency(transparency);
+        }
+
+        /// <summary>
+        /// Resolve both the Ghost ID and Real ID for a change.
+        /// </summary>
+        private static (ElementId GhostId, ElementId RealId) ResolveBothElementIds(Document doc, Change change)
+        {
+            if (change == null) return (ElementId.InvalidElementId, ElementId.InvalidElementId);
+
+            ElementId ghostId = ElementId.InvalidElementId;
+            ElementId realId = ElementId.InvalidElementId;
 
             string key = PreviewStateService.GetChangeTrackingKey(change);
 
             // Temp added elements
             if (key != null && PreviewStateService.TempAddedElements.TryGetValue(key, out ElementId addedId))
-                return addedId;
+                ghostId = addedId; // Treating added as ghost for structure
 
             // Ghost elements
-            if (key != null && PreviewStateService.TempGhostElements.TryGetValue(key, out ElementId ghostId))
-                return ghostId;
+            if (key != null)
+            {
+                if (change.ChangeType == "modified")
+                {
+                    if (PreviewStateService.TempGhostElements.TryGetValue(key + "_remote", out ElementId gId))
+                        ghostId = gId;
+                }
+                else
+                {
+                    if (PreviewStateService.TempGhostElements.TryGetValue(key, out ElementId gId))
+                        ghostId = gId;
+                }
+            }
 
             // Existing elements: RepoGuid lookup
             if (!string.IsNullOrEmpty(change.RepoGuid))
             {
                 Element el = RepoGuidService.FindElement(doc, change.RepoGuid, null);
-                if (el != null) return el.Id;
+                if (el != null) realId = el.Id;
             }
 
             // UniqueId lookup
-            if (!string.IsNullOrEmpty(change.ElementId))
+            if (realId == ElementId.InvalidElementId && !string.IsNullOrEmpty(change.ElementId))
             {
                 try
                 {
                     Element el = doc.GetElement(change.ElementId);
-                    if (el != null) return el.Id;
+                    if (el != null) realId = el.Id;
                 }
                 catch { }
             }
 
             // Numeric ID
-            if (!string.IsNullOrEmpty(change.ElementId) && long.TryParse(change.ElementId, out long numId))
+            if (realId == ElementId.InvalidElementId && !string.IsNullOrEmpty(change.ElementId) && long.TryParse(change.ElementId, out long numId))
             {
                 try
                 {
                     Element el = doc.GetElement(new ElementId(numId));
-                    if (el != null) return el.Id;
+                    if (el != null) realId = el.Id;
                 }
                 catch { }
             }
 
-            return ElementId.InvalidElementId;
+            return (ghostId, realId);
+        }
+        
+        /// <summary>
+        /// Resolve a Change to its Revit ElementId in the current model.
+        /// </summary>
+        private static ElementId ResolveElementId(Document doc, Change change)
+        {
+            var ids = ResolveBothElementIds(doc, change);
+            return ids.RealId != ElementId.InvalidElementId ? ids.RealId : ids.GhostId;
         }
 
         private static FillPatternElement FindSolidFill(Document doc)
@@ -273,8 +374,8 @@ namespace RevitVersionControl.UI
             foreach (var conflict in spatialConflicts)
             {
                 // Parse the conflict.ElementId to get both element IDs
-                // Format: "elem1_id+elem2_id"
-                var parts = conflict.ElementId.Split('+');
+                // Format: "elem1_id|elem2_id"
+                var parts = conflict.ElementId.Split('|');
                 if (parts.Length != 2) continue;
 
                 var elem1Id = parts[0];
