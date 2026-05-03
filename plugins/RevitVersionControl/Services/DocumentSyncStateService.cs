@@ -15,6 +15,8 @@ namespace RevitVersionControl.Services
         public string MergeParentCommitId { get; set; }
         public DateTime LastSyncedAtUtc { get; set; }
         public DateTime? LastSyncedFileWriteUtc { get; set; }
+        public long? LastDiffViewElementIdValue { get; set; }
+        public string LastDiffSessionId { get; set; }
     }
 
     public class ProjectSyncHint
@@ -203,6 +205,45 @@ namespace RevitVersionControl.Services
 
             PersistStore(store);
             SaveProjectHint(documentPath, projectId, modelId, currentCommitId, currentBranchName, mergeParentCommitId);
+        }
+
+        public static void SaveDiffSession(string documentPath, string projectId, long diffViewElementIdValue, Guid sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath))
+                return;
+
+            try
+            {
+                var store = LoadStore();
+                string normalizedPath = NormalizePath(documentPath);
+                if (!store.TryGetValue(normalizedPath, out var state) || state == null)
+                {
+                    state = new DocumentSyncState
+                    {
+                        DocumentPath = documentPath,
+                        ProjectId = projectId,
+                        LastSyncedAtUtc = DateTime.UtcNow,
+                    };
+                }
+
+                if (diffViewElementIdValue == 0 || sessionId == Guid.Empty)
+                {
+                    state.LastDiffViewElementIdValue = null;
+                    state.LastDiffSessionId = null;
+                }
+                else
+                {
+                    state.LastDiffViewElementIdValue = diffViewElementIdValue;
+                    state.LastDiffSessionId = sessionId.ToString("D");
+                }
+
+                store[normalizedPath] = state;
+                PersistStore(store);
+            }
+            catch
+            {
+                // Best-effort persistence; never fail callers because of this.
+            }
         }
 
         public static void SaveAcceptedDocumentHint(string documentPath, string projectId)
