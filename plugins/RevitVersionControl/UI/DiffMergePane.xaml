@@ -50,7 +50,7 @@ Title="Changes &amp; Merge">
             <Border Grid.Row="1" x:Name="ConflictBanner" Background="#FFF3CD" Padding="10" 
                     BorderThickness="0,0,0,1" BorderBrush="#FFD700" Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="⚠ MERGE CONFLICTS DETECTED" FontWeight="Bold" Foreground="#856404" FontSize="13"/>
+                    <TextBlock Text="WARNING: MERGE CONFLICTS DETECTED" FontWeight="Bold" Foreground="#856404" FontSize="13"/>
                     <TextBlock x:Name="ConflictBannerText" Text="Resolve conflicts in Preview Mode before finalizing."
                                Foreground="#856404" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
@@ -95,7 +95,7 @@ Title="Changes &amp; Merge">
             </ListView>
         </Grid>
 
-        <!-- Preview Mode UI (Hidden initially) — NO ScrollViewer to avoid event-swallowing -->
+        <!-- Preview Mode UI (Hidden initially) -->
         <StackPanel Grid.Row="1" x:Name="PreviewModeGrid" Visibility="Collapsed" Background="#F8F8F8" Margin="15">
             <TextBlock Text="Visual Preview Active" FontWeight="Bold" FontSize="14" Foreground="#007ACC" Margin="0,0,0,10"/>
             <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,0,0,10">
@@ -125,7 +125,7 @@ Title="Changes &amp; Merge">
                     <Border x:Name="PreviewConflictPanel" Background="#FFF3CD" BorderBrush="#FFD700" 
                             BorderThickness="1" CornerRadius="5" Padding="10" Margin="0,10,0,0" Visibility="Collapsed">
                         <StackPanel>
-                            <TextBlock Text="⚠ CONFLICT" FontWeight="Bold" Foreground="#856404" FontSize="13" Margin="0,0,0,5"/>
+                            <TextBlock Text="CONFLICT" FontWeight="Bold" Foreground="#856404" FontSize="13" Margin="0,0,0,5"/>
                             <TextBlock x:Name="PreviewConflictDescription" Text="" TextWrapping="Wrap" Foreground="#856404" FontSize="11" Margin="0,0,0,10"/>
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton x:Name="ConflictKeepOurs" Content="Keep Ours" GroupName="PreviewConflict" IsChecked="True" Margin="0,0,15,0" Checked="ConflictResolution_Changed"/>
@@ -138,18 +138,21 @@ Title="Changes &amp; Merge">
             </Border>
         </StackPanel>
 
-        <!-- Navigation row (only in preview mode) — OUTSIDE of preview content, in its own Grid.Row -->
+        <!-- Navigation row (only in preview mode) -->
         <StackPanel Grid.Row="2" x:Name="PreviewNavPanel" Orientation="Horizontal" HorizontalAlignment="Center" 
                     Visibility="Collapsed" Margin="5">
-            <Button Content="◄ Previous" Width="90" Height="30" Margin="0,0,10,0" Click="PrevChange_Click"/>
+            <Button Content="Previous" Width="90" Height="30" Margin="0,0,10,0" Click="PrevChange_Click"/>
             <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,10,0" Click="ZoomElement_Click"/>
-            <Button Content="Next ►" Width="90" Height="30" Click="NextChange_Click"/>
+            <Button Content="Next" Width="90" Height="30" Click="NextChange_Click"/>
         </StackPanel>
 
         <!-- Action Buttons -->
         <Border Grid.Row="3" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
             <Grid>
                 <StackPanel x:Name="ListActionPanel" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Apply Selected" Width="120" Height="30" Margin="0,0,15,0"
+                            Background="#17A2B8" Foreground="White" FontWeight="Bold"
+                            Click="ApplySelected_Click"/>
                     <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,15,0"
                             Click="ZoomElement_Click"/>
                     <Button x:Name="StartMergeButton" Content="Start Visual Merge" Width="140" Height="30" Margin="0,0,15,0"

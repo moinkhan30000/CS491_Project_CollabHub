@@ -12,6 +12,7 @@ from schemas.diff_schema import (
 )
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
+from repositories.branch_repository import BranchRepository
 from diff_engine import DiffEngine
 from services.merge_resolution_applier import MergeResolutionApplier
 
@@ -19,6 +20,7 @@ router = APIRouter()
 diff_engine = DiffEngine()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
+branch_repo = BranchRepository()
 resolution_applier = MergeResolutionApplier()
 
 
@@ -84,15 +86,48 @@ async def merge_commits(
     )
     skipped = resolution_applier.count_skipped(all_conflicts, merge_request.resolutions)
 
-    # NOTE: merge commit persistence is not yet implemented.
-    # merged_changes contains the correct final changeset for when it is.
+    # If all conflicts resolved, persist the merge commit and update the branch head
+    if skipped == 0:
+        target_commit = commit_repo.get_commit(merge_request.targetCommit)
+        model_id = target_commit.modelId if target_commit else base_snapshot.modelId
+
+        merge_commit = commit_repo.create_commit(
+            project_id=project_id,
+            model_id=model_id,
+            message=merge_request.message,
+            author=current_user.userId,
+            parent_commit=merge_request.targetCommit,
+            parent_commit2=merge_request.sourceCommit,
+            diff=merged_changes,
+            element_count=0,
+            changed_elements=len(merged_changes),
+            branch_name=merge_request.branchName,
+        )
+
+        if merge_request.branchName:
+            branch = branch_repo.get_branch(project_id, merge_request.branchName)
+            if branch:
+                branch_repo.update_branch_head(branch.branchId, merge_commit.commitId)
+
+        return MergeResult(
+            mergeCommitId=merge_commit.commitId,
+            status="success",
+            appliedChanges=len(merged_changes),
+            skippedChanges=0,
+            conflicts=[],
+        )
+
+    # Partial resolution: still conflicts remaining
+    unresolved = [
+        c for c in all_conflicts
+        if not any(r.elementId == c.elementId for r in merge_request.resolutions)
+    ]
     return MergeResult(
-        mergeCommitId="pending",        # placeholder until commit persistence is added
-        status="success" if skipped == 0 else "conflict",
+        mergeCommitId="",
+        status="conflict",
         appliedChanges=len(merged_changes),
         skippedChanges=skipped,
-        conflicts=[c for c in all_conflicts
-                   if not any(r.elementId == c.elementId for r in merge_request.resolutions)],
+        conflicts=unresolved,
     )
 
 

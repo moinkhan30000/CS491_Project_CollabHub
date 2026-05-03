@@ -41,14 +41,12 @@ namespace RevitVersionControl.Services
         {
             var payload = new { email, password };
             var response = await PostAsync<LoginResponse>("/auth/login", payload);
-            
             if (response != null && !string.IsNullOrEmpty(response.AccessToken))
             {
                 SetAuthToken(response.AccessToken);
                 CurrentUserEmail = email?.Trim();
                 return true;
             }
-            
             return false;
         }
 
@@ -69,7 +67,6 @@ namespace RevitVersionControl.Services
                 CurrentUserEmail = email?.Trim();
                 return true;
             }
-            
             return false;
         }
 
@@ -115,7 +112,6 @@ namespace RevitVersionControl.Services
                     content.Add(fileContent, "file", System.IO.Path.GetFileName(filePath));
 
                     var response = await _httpClient.PostAsync(_baseUrl + "/projects/init", content).ConfigureAwait(false);
-
                     if (!response.IsSuccessStatusCode)
                     {
                         var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -133,8 +129,7 @@ namespace RevitVersionControl.Services
             try
             {
                 var response = await _httpClient.PostAsync($"{_baseUrl}/projects/{projectId}/invite?email={Uri.EscapeDataString(email)}", null);
-                if (response.IsSuccessStatusCode) return true;
-                return false;
+                return response.IsSuccessStatusCode;
             }
             catch { return false; }
         }
@@ -172,7 +167,6 @@ namespace RevitVersionControl.Services
                     }
                     return savePath;
                 }
-                
                 return "Success";
             }
             catch (Exception ex)
@@ -201,7 +195,6 @@ namespace RevitVersionControl.Services
             {
                 var response = await _httpClient.DeleteAsync($"{_baseUrl}/projects/{projectId}/branches/{Uri.EscapeDataString(branchName)}");
                 if (response.IsSuccessStatusCode) return true;
-                
                 var errorContent = await response.Content.ReadAsStringAsync();
                 LastError = $"HTTP {(int)response.StatusCode}: {errorContent}";
                 return false;
@@ -225,7 +218,6 @@ namespace RevitVersionControl.Services
                 branchName = branchName,
                 snapshot = snapshot
             };
-            
             return await PostAsync<Commit>($"/projects/{projectId}/snapshots", payload);
         }
 
@@ -243,10 +235,7 @@ namespace RevitVersionControl.Services
         public async Task<Commit> GetLatestCommitAsync(string projectId)
         {
             var commits = await GetCommitsAsync(projectId, limit: 1, offset: 0);
-            if (commits == null || commits.Count == 0)
-                return null;
-
-            return commits[0];
+            return (commits == null || commits.Count == 0) ? null : commits[0];
         }
 
         public async Task<Commit> GetProjectRootCommitAsync(string projectId)
@@ -318,7 +307,6 @@ namespace RevitVersionControl.Services
             catch (Exception ex)
             {
                 LastError = ex.Message;
-                Console.WriteLine($"Payload upload failed: {ex.Message}");
                 return null;
             }
         }
@@ -348,7 +336,6 @@ namespace RevitVersionControl.Services
             catch (Exception ex)
             {
                 LastError = ex.Message;
-                Console.WriteLine($"Payload download failed: {ex.Message}");
                 return false;
             }
         }
@@ -388,7 +375,6 @@ namespace RevitVersionControl.Services
             catch (Exception ex)
             {
                 LastError = ex.Message;
-                Console.WriteLine($"Base file upload failed: {ex.Message}");
                 return false;
             }
         }
@@ -404,24 +390,35 @@ namespace RevitVersionControl.Services
 
         public async Task<PullResult> PullChangesAsync(string projectId, string currentCommit, string targetCommit)
         {
-            var payload = new
-            {
-                currentCommit,
-                targetCommit,
-                strategy = "auto"
-            };
-            
+            var payload = new { currentCommit, targetCommit, strategy = "auto" };
             return await PostAsync<PullResult>($"/projects/{projectId}/pull", payload);
         }
 
         public async Task<Merge3WayResult> Merge3WayAsync(string projectId, string sourceCommitId, string targetCommitId)
         {
+            var payload = new { sourceCommitId, targetCommitId };
+            return await PostAsync<Merge3WayResult>($"/projects/{projectId}/merge3way", payload);
+        }
+
+        public async Task<MergeResult> MergeAsync(
+            string projectId,
+            string baseCommit,
+            string sourceCommit,
+            string targetCommit,
+            string message,
+            string branchName,
+            List<MergeResolution> resolutions = null)
+        {
             var payload = new
             {
-                sourceCommitId,
-                targetCommitId
+                baseCommit,
+                sourceCommit,
+                targetCommit,
+                message,
+                branchName,
+                resolutions = resolutions ?? new List<MergeResolution>()
             };
-            return await PostAsync<Merge3WayResult>($"/projects/{projectId}/merge3way", payload);
+            return await PostAsync<MergeResult>($"/projects/{projectId}/merge", payload);
         }
 
         // ========== Generic HTTP Methods ==========
@@ -437,7 +434,6 @@ namespace RevitVersionControl.Services
                     LastError = $"HTTP {(int)response.StatusCode}: {content}";
                     return default(T);
                 }
-
                 LastError = null;
                 return JsonConvert.DeserializeObject<T>(content);
             }
@@ -810,18 +806,40 @@ namespace RevitVersionControl.Services
     {
         [JsonProperty("commonAncestorId")]
         public string CommonAncestorId { get; set; }
-
         [JsonProperty("sourceChanges")]
         public List<Change> SourceChanges { get; set; }
-
         [JsonProperty("targetChanges")]
         public List<Change> TargetChanges { get; set; }
-
         [JsonProperty("conflicts")]
         public List<Conflict> Conflicts { get; set; }
-
         [JsonProperty("hasConflicts")]
         public bool HasConflicts { get; set; }
+        [JsonProperty("autoMergedChanges")]
+        public List<Change> AutoMergedChanges { get; set; }
+        [JsonProperty("bothDeletedElements")]
+        public List<string> BothDeletedElements { get; set; }
+    }
+
+    public class MergeResult
+    {
+        [JsonProperty("mergeCommitId")]
+        public string MergeCommitId { get; set; }
+        [JsonProperty("status")]
+        public string Status { get; set; }
+        [JsonProperty("appliedChanges")]
+        public int AppliedChanges { get; set; }
+        [JsonProperty("skippedChanges")]
+        public int SkippedChanges { get; set; }
+        [JsonProperty("conflicts")]
+        public List<Conflict> Conflicts { get; set; }
+    }
+
+    public class MergeResolution
+    {
+        [JsonProperty("elementId")]
+        public string ElementId { get; set; }
+        [JsonProperty("resolution")]
+        public string Resolution { get; set; }
     }
 
     public class Invite

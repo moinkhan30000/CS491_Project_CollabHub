@@ -56,7 +56,6 @@ namespace RevitVersionControl.UI
             InitializeComponent();
         }
 
-        /// <summary>Show/hide the Start Visual Merge button based on merge mode.</summary>
         private void UpdateMergeButtonVisibility()
         {
             if (_isMergeMode && _currentChanges.Count > 0)
@@ -121,9 +120,6 @@ namespace RevitVersionControl.UI
             UpdateMergeButtonVisibility();
         }
 
-        /// <summary>
-        /// Load a 3-way merge result — this is the primary merge flow.
-        /// </summary>
         public void LoadMerge3WayResult(Merge3WayResult result, string projectId, string sourceCommitId, string targetCommitId, string modelId)
         {
             if (result == null) { Clear(); return; }
@@ -138,15 +134,40 @@ namespace RevitVersionControl.UI
             BaseCommitText.Text = shortSrc;
             TargetCommitText.Text = shortTgt;
 
-            // Store 3-way merge data in PreviewStateService for the preview handler
             PreviewStateService.Is3WayMerge = true;
-            // IMPORTANT: Copy lists to avoid shared-reference mutation when PreviewStateService.Clear() runs
             PreviewStateService.SourceChanges = new List<Change>(result.SourceChanges ?? new List<Change>());
             PreviewStateService.TargetChanges = new List<Change>(result.TargetChanges ?? new List<Change>());
             PreviewStateService.ActiveConflicts = new List<Conflict>(result.Conflicts ?? new List<Conflict>());
 
             _currentConflicts = new List<Conflict>(result.Conflicts ?? new List<Conflict>());
-            _currentChanges = new List<Change>(result.TargetChanges ?? new List<Change>());
+
+            // Build a unified change list from all three sources, de-duplicated by identity.
+            // Auto-merged entries take priority, then source, then target.
+            var seen = new HashSet<string>();
+            var unified = new List<Change>();
+
+            foreach (var c in result.AutoMergedChanges ?? new List<Change>())
+            {
+                string id = c.RepoGuid ?? c.ElementId;
+                if (!string.IsNullOrEmpty(id) && seen.Add(id))
+                    unified.Add(c);
+            }
+
+            foreach (var c in result.SourceChanges ?? new List<Change>())
+            {
+                string id = c.RepoGuid ?? c.ElementId;
+                if (!string.IsNullOrEmpty(id) && seen.Add(id))
+                    unified.Add(c);
+            }
+
+            foreach (var c in result.TargetChanges ?? new List<Change>())
+            {
+                string id = c.RepoGuid ?? c.ElementId;
+                if (!string.IsNullOrEmpty(id) && seen.Add(id))
+                    unified.Add(c);
+            }
+
+            _currentChanges = unified;
 
             var summary = Summarize(_currentChanges);
             AddedCountText.Text = summary.added.ToString();
@@ -238,6 +259,49 @@ namespace RevitVersionControl.UI
             }
         }
 
+        private void ApplySelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentChanges == null || _currentChanges.Count == 0)
+            {
+                MessageBox.Show("No changes to apply.", "Apply Selected", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var items = ChangesListView.ItemsSource as List<ChangeItem>;
+            if (items == null) return;
+
+            var selectedChanges = new List<Change>();
+            foreach (var item in items)
+            {
+                if (!item.IsSelected) continue;
+                var change = _currentChanges.FirstOrDefault(c => c.ElementId == item.ElementId);
+                if (change != null)
+                    selectedChanges.Add(change);
+            }
+
+            if (selectedChanges.Count == 0)
+            {
+                MessageBox.Show("No changes are checked. Check at least one change to apply.", "Apply Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                _applyHandler.Queue(new DiffMergeApplyRequest
+                {
+                    ProjectId = _currentProjectId,
+                    TargetCommitId = _currentTargetCommitId,
+                    ModelId = _currentModelId,
+                    Changes = selectedChanges
+                });
+                _applyExternalEvent.Raise();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to queue apply: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void CancelPreview_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -254,7 +318,6 @@ namespace RevitVersionControl.UI
 
         private void FinalizeMerge_Click(object sender, RoutedEventArgs e)
         {
-            // Default unresolved conflicts to "keep_local"
             if (_currentConflicts != null)
             {
                 foreach (var conflict in _currentConflicts)
@@ -324,22 +387,16 @@ namespace RevitVersionControl.UI
         private void ZoomElement_Click(object sender, RoutedEventArgs e)
         {
             if (_isPreviewing)
-            {
                 SendVisualUpdate(zoomTo: true);
-            }
             else
-            {
                 ZoomToSelectedListElement();
-            }
         }
 
         private void ZoomToCurrentPreviewElement()
         {
             var items = ChangesListView.ItemsSource as List<ChangeItem>;
             if (items == null || _previewIndex < 0 || _previewIndex >= items.Count) return;
-
-            var item = items[_previewIndex];
-            ZoomToChangeItem(item);
+            ZoomToChangeItem(items[_previewIndex]);
         }
 
         private void ZoomToSelectedListElement()
@@ -363,27 +420,18 @@ namespace RevitVersionControl.UI
             string key = PreviewStateService.GetChangeTrackingKey(change);
             Autodesk.Revit.DB.ElementId targetId = Autodesk.Revit.DB.ElementId.InvalidElementId;
 
-            // Check temp added elements first (newly created during preview)
             if (key != null && PreviewStateService.TempAddedElements.TryGetValue(key, out Autodesk.Revit.DB.ElementId tempId))
-            {
                 targetId = tempId;
-            }
-            // Check ghost elements for deleted changes
             else if (key != null && PreviewStateService.TempGhostElements.TryGetValue(key, out Autodesk.Revit.DB.ElementId ghostId))
-            {
                 targetId = ghostId;
-            }
 
             if (targetId != Autodesk.Revit.DB.ElementId.InvalidElementId)
             {
-                // We have a direct ElementId — use it
                 _zoomHandler.ZoomTo(targetId);
                 _zoomExternalEvent.Raise();
             }
             else
             {
-                // For modified/existing elements: pass RepoGuid + ElementId (UniqueId)
-                // to the zoom handler so it can resolve on the Revit thread
                 _zoomHandler.ZoomTo(change.RepoGuid, change.ElementId);
                 _zoomExternalEvent.Raise();
             }
@@ -393,10 +441,7 @@ namespace RevitVersionControl.UI
         {
             var items = ChangesListView.ItemsSource as List<ChangeItem>;
             if (items != null && _previewIndex >= 0 && _previewIndex < items.Count)
-            {
                 items[_previewIndex].IsSelected = PreviewAcceptCheckbox.IsChecked == true;
-            }
-            // Update visuals in real-time
             SendVisualUpdate(zoomTo: false);
         }
 
@@ -413,14 +458,9 @@ namespace RevitVersionControl.UI
             else if (ConflictKeepBoth.IsChecked == true) resolution = "keep_both";
 
             PreviewStateService.ConflictResolutions[item.ConflictId ?? item.ElementId] = resolution;
-            // Update visuals in real-time
             SendVisualUpdate(zoomTo: false);
         }
 
-        /// <summary>
-        /// Sends the current UI state to the DiffMergeUpdateHandler so it can
-        /// refresh all graphic overrides on the Revit thread in real-time.
-        /// </summary>
         private void SendVisualUpdate(bool zoomTo)
         {
             if (!_isPreviewing || _currentChanges == null || _currentChanges.Count == 0) return;
@@ -428,22 +468,14 @@ namespace RevitVersionControl.UI
             var items = ChangesListView.ItemsSource as List<ChangeItem>;
             if (items == null) return;
 
-            // Build included states list (parallel to _currentChanges)
             var includedStates = new List<bool>();
             for (int i = 0; i < _currentChanges.Count; i++)
-            {
-                if (i < items.Count)
-                    includedStates.Add(items[i].IsSelected);
-                else
-                    includedStates.Add(true);
-            }
+                includedStates.Add(i < items.Count ? items[i].IsSelected : true);
 
-            // Build conflict resolutions copy
             var conflictRes = new Dictionary<string, string>(PreviewStateService.ConflictResolutions);
 
-            Change currentChange = null;
-            if (_previewIndex >= 0 && _previewIndex < _currentChanges.Count)
-                currentChange = _currentChanges[_previewIndex];
+            Change currentChange = (_previewIndex >= 0 && _previewIndex < _currentChanges.Count)
+                ? _currentChanges[_previewIndex] : null;
 
             _updateHandler.Queue(new DiffMergeUpdateRequest
             {
@@ -470,24 +502,18 @@ namespace RevitVersionControl.UI
             PreviewElementType.Text = item.ElementType;
             PreviewElementDetails.Text = item.Description + "\n\n" + item.Details;
             
-            // Unsubscribe to avoid triggering event
             PreviewAcceptCheckbox.Checked -= PreviewAcceptCheckbox_Changed;
             PreviewAcceptCheckbox.Unchecked -= PreviewAcceptCheckbox_Changed;
             PreviewAcceptCheckbox.IsChecked = item.IsSelected;
             PreviewAcceptCheckbox.Checked += PreviewAcceptCheckbox_Changed;
             PreviewAcceptCheckbox.Unchecked += PreviewAcceptCheckbox_Changed;
 
-            // Show/hide conflict resolution panel
             if (item.IsConflict)
             {
                 PreviewConflictPanel.Visibility = Visibility.Visible;
                 PreviewConflictDescription.Text = item.ConflictDescription ?? "This element was modified on both branches.";
+                ConflictKeepBoth.Visibility = item.ConflictType == "spatial_collision" ? Visibility.Visible : Visibility.Collapsed;
 
-                // Show "Keep Both" only for spatial collisions
-                ConflictKeepBoth.Visibility = item.ConflictType == "spatial_collision" 
-                    ? Visibility.Visible : Visibility.Collapsed;
-
-                // Restore saved resolution
                 string savedRes = null;
                 PreviewStateService.ConflictResolutions.TryGetValue(item.ConflictId ?? item.ElementId, out savedRes);
 
@@ -518,7 +544,6 @@ namespace RevitVersionControl.UI
                 return items;
             }
 
-            // Build conflict lookup by both repoGuid and elementId
             var conflictMap = new Dictionary<string, Conflict>();
             if (conflicts != null)
             {

@@ -29,11 +29,9 @@ namespace RevitVersionControl.UI
             PreviewStateService.Clear();
             PreviewStateService.OriginalViewId = uidoc.ActiveView.Id;
 
-            // Diagnostic counters
             int addedCreated = 0, addedFailed = 0;
             int ghostCreated = 0, ghostFailed = 0;
             int colorApplied = 0, colorFailed = 0;
-            string solidFillStatus = "NOT FOUND";
             List<string> failReasons = new List<string>();
 
             using (Transaction trans = new Transaction(doc, "CollabHub Merge Preview"))
@@ -101,7 +99,6 @@ namespace RevitVersionControl.UI
 
                     // --- 2. Find solid fill pattern ---
                     FillPatternElement solidFill = FindSolidFillPattern(doc);
-                    solidFillStatus = solidFill != null ? $"FOUND: {solidFill.Name}" : "NOT FOUND (colors may not show)";
 
                     // --- 3. Create temporary elements for ADDED changes ---
                     var addedChanges = request.Changes.Where(c => c.ChangeType == "added").ToList();
@@ -164,7 +161,6 @@ namespace RevitVersionControl.UI
                                 }
                             }
 
-                            // Fallback: DirectShape box
                             if (CreateGhostDirectShape(doc, change, trackingKey))
                                 ghostCreated++;
                             else
@@ -174,10 +170,9 @@ namespace RevitVersionControl.UI
                     }
 
                     // --- 5. Apply Graphic Overrides ---
-                    Color colorAdded = new Color(0, 200, 0);        // Green
-                    Color colorModified = new Color(255, 165, 0);   // Orange
-                    Color colorDeleted = new Color(255, 0, 0);      // Red
-                    Color colorConflict = new Color(255, 0, 255);   // Magenta
+                    Color colorAdded    = new Color(0, 200, 0);
+                    Color colorModified = new Color(255, 165, 0);
+                    Color colorDeleted  = new Color(255, 0, 0);
 
                     foreach (var change in request.Changes)
                     {
@@ -196,18 +191,13 @@ namespace RevitVersionControl.UI
                         }
                         else if (change.ChangeType == "modified")
                         {
-                            // Try RepoGuid lookup
                             Element el = null;
                             if (!string.IsNullOrEmpty(change.RepoGuid))
-                            {
                                 el = RepoGuidService.FindElement(doc, change.RepoGuid, null);
-                            }
-                            // Try UniqueId lookup
                             if (el == null && !string.IsNullOrEmpty(change.ElementId))
                             {
                                 try { el = doc.GetElement(change.ElementId); } catch { }
                             }
-                            // Try numeric ID
                             if (el == null && !string.IsNullOrEmpty(change.ElementId))
                             {
                                 if (long.TryParse(change.ElementId, out long numId))
@@ -231,7 +221,6 @@ namespace RevitVersionControl.UI
                             }
                             else
                             {
-                                // Try to find existing element and color it red
                                 Element el = null;
                                 if (!string.IsNullOrEmpty(change.RepoGuid))
                                     el = RepoGuidService.FindElement(doc, change.RepoGuid, null);
@@ -283,9 +272,7 @@ namespace RevitVersionControl.UI
                         {
                             colorFailed++;
                             if (change.ChangeType == "modified" || change.ChangeType == "deleted")
-                            {
-                                failReasons.Add($"FIND: {change.ChangeType} {change.Category}/{change.Type} id={change.ElementId} repo={change.RepoGuid} → NOT FOUND");
-                            }
+                                failReasons.Add($"FIND: {change.ChangeType} {change.Category}/{change.Type} id={change.ElementId} repo={change.RepoGuid} NOT FOUND");
                         }
                     }
 
@@ -302,27 +289,18 @@ namespace RevitVersionControl.UI
             // Switch to the preview view
             if (PreviewStateService.TempViewId != ElementId.InvalidElementId)
             {
-                try
-                {
-                    uidoc.ActiveView = doc.GetElement(PreviewStateService.TempViewId) as View;
-                }
+                try { uidoc.ActiveView = doc.GetElement(PreviewStateService.TempViewId) as View; }
                 catch { }
             }
 
-            // Build diagnostic summary
-            string diagnostics = $"Solid Fill: {solidFillStatus}\n" +
-                                 $"Added: {addedCreated} created, {addedFailed} failed\n" +
-                                 $"Ghosts: {ghostCreated} created, {ghostFailed} failed\n" +
-                                 $"Colors: {colorApplied} applied, {colorFailed} failed";
+            // Log diagnostics silently for debugging — no blocking dialog
+            System.Diagnostics.Debug.WriteLine(
+                $"[CollabHub MergePreview] Added: {addedCreated} ok / {addedFailed} fail | " +
+                $"Ghosts: {ghostCreated} ok / {ghostFailed} fail | " +
+                $"Colors: {colorApplied} ok / {colorFailed} fail");
 
-            if (failReasons.Count > 0)
-            {
-                diagnostics += "\n\nDetails:\n" + string.Join("\n", failReasons.Take(10));
-            }
-
-            TaskDialog.Show("Merge Preview", diagnostics +
-                "\n\nGreen = Added | Orange = Modified | Red = Deleted\n" +
-                "Use the Changes & Merge pane to review and finalize.");
+            foreach (var reason in failReasons)
+                System.Diagnostics.Debug.WriteLine($"  [CollabHub MergePreview] {reason}");
         }
 
         /// <summary>
