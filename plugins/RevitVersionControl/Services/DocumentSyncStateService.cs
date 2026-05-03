@@ -12,6 +12,7 @@ namespace RevitVersionControl.Services
         public string ModelId { get; set; }
         public string CurrentCommitId { get; set; }
         public string CurrentBranchName { get; set; }
+        public string MergeParentCommitId { get; set; }
         public DateTime LastSyncedAtUtc { get; set; }
         public DateTime? LastSyncedFileWriteUtc { get; set; }
         public long? LastDiffViewElementIdValue { get; set; }
@@ -24,6 +25,7 @@ namespace RevitVersionControl.Services
         public string ModelId { get; set; }
         public string CurrentCommitId { get; set; }
         public string CurrentBranchName { get; set; }
+        public string MergeParentCommitId { get; set; }
         public string LastKnownDocumentPath { get; set; }
         public DateTime LastUpdatedUtc { get; set; }
     }
@@ -178,7 +180,7 @@ namespace RevitVersionControl.Services
             };
         }
 
-        public static void SaveState(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main")
+        public static void SaveState(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main", string mergeParentCommitId = null)
         {
             if (string.IsNullOrWhiteSpace(documentPath)
                 || string.IsNullOrWhiteSpace(projectId)
@@ -196,12 +198,13 @@ namespace RevitVersionControl.Services
                 ModelId = string.IsNullOrWhiteSpace(modelId) ? documentPath : modelId,
                 CurrentCommitId = currentCommitId,
                 CurrentBranchName = currentBranchName ?? "main",
+                MergeParentCommitId = mergeParentCommitId,
                 LastSyncedAtUtc = DateTime.UtcNow,
                 LastSyncedFileWriteUtc = GetSafeLastWriteTimeUtc(documentPath),
             };
 
             PersistStore(store);
-            SaveProjectHint(documentPath, projectId, modelId, currentCommitId, currentBranchName);
+            SaveProjectHint(documentPath, projectId, modelId, currentCommitId, currentBranchName, mergeParentCommitId);
         }
 
         public static void SaveDiffSession(string documentPath, string projectId, long diffViewElementIdValue, Guid sessionId)
@@ -318,7 +321,7 @@ namespace RevitVersionControl.Services
             }
         }
 
-        private static void SaveProjectHint(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main")
+        private static void SaveProjectHint(string documentPath, string projectId, string modelId, string currentCommitId, string currentBranchName = "main", string mergeParentCommitId = null)
         {
             try
             {
@@ -329,6 +332,7 @@ namespace RevitVersionControl.Services
                     ModelId = string.IsNullOrWhiteSpace(modelId) ? documentPath : modelId,
                     CurrentCommitId = currentCommitId,
                     CurrentBranchName = currentBranchName ?? "main",
+                    MergeParentCommitId = mergeParentCommitId,
                     LastKnownDocumentPath = documentPath,
                     LastUpdatedUtc = DateTime.UtcNow,
                 };

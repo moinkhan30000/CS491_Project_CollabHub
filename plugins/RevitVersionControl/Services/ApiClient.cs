@@ -414,6 +414,16 @@ namespace RevitVersionControl.Services
             return await PostAsync<PullResult>($"/projects/{projectId}/pull", payload);
         }
 
+        public async Task<Merge3WayResult> Merge3WayAsync(string projectId, string sourceCommitId, string targetCommitId)
+        {
+            var payload = new
+            {
+                sourceCommitId,
+                targetCommitId
+            };
+            return await PostAsync<Merge3WayResult>($"/projects/{projectId}/merge3way", payload);
+        }
+
         // ========== Generic HTTP Methods ==========
 
         private async Task<T> GetAsync<T>(string endpoint)
@@ -557,6 +567,9 @@ namespace RevitVersionControl.Services
         [JsonProperty("parentCommit")]
         public string ParentCommit { get; set; }
 
+        [JsonProperty("parentCommit2")]
+        public string ParentCommit2 { get; set; }
+
         [JsonProperty("changedElements")]
         public int ChangedElements { get; set; }
 
@@ -620,6 +633,9 @@ namespace RevitVersionControl.Services
         
         [JsonProperty("parentCommit")]
         public string ParentCommit { get; set; }
+
+        [JsonProperty("parentCommit2")]
+        public string ParentCommit2 { get; set; }
     }
 
     public class CommitPackage
@@ -632,6 +648,9 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("parentCommit")]
         public string ParentCommit { get; set; }
+
+        [JsonProperty("parentCommit2")]
+        public string ParentCommit2 { get; set; }
 
         [JsonProperty("changes")]
         public List<Change> Changes { get; set; }
@@ -754,16 +773,55 @@ namespace RevitVersionControl.Services
         public PayloadRef Payload { get; set; }
     }
 
+    public class Conflict
+    {
+        [JsonProperty("elementId")]
+        public string ElementId { get; set; }
+
+        [JsonProperty("conflictType")]
+        public string ConflictType { get; set; }
+
+        [JsonProperty("description")]
+        public string Description { get; set; }
+
+        [JsonProperty("localChange")]
+        public Dictionary<string, object> LocalChange { get; set; }
+
+        [JsonProperty("remoteChange")]
+        public Dictionary<string, object> RemoteChange { get; set; }
+
+        [JsonProperty("resolutionOptions")]
+        public List<string> ResolutionOptions { get; set; }
+    }
+
     public class PullResult
     {
         [JsonProperty("changes")]
         public List<Change> Changes { get; set; }
         
         [JsonProperty("conflicts")]
-        public List<object> Conflicts { get; set; }
+        public List<Conflict> Conflicts { get; set; }
         
         [JsonProperty("requiresResolution")]
         public bool RequiresResolution { get; set; }
+    }
+
+    public class Merge3WayResult
+    {
+        [JsonProperty("commonAncestorId")]
+        public string CommonAncestorId { get; set; }
+
+        [JsonProperty("sourceChanges")]
+        public List<Change> SourceChanges { get; set; }
+
+        [JsonProperty("targetChanges")]
+        public List<Change> TargetChanges { get; set; }
+
+        [JsonProperty("conflicts")]
+        public List<Conflict> Conflicts { get; set; }
+
+        [JsonProperty("hasConflicts")]
+        public bool HasConflicts { get; set; }
     }
 
     public class Invite

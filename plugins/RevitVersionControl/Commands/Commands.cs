@@ -218,7 +218,8 @@ namespace RevitVersionControl.Commands
                     UserName = uiApp.Application.Username,
                     CommitMessage = commitMessage,
                     Elements = extractedElements,
-                    ParentCommit = canUseTrackedState ? trackedState.CurrentCommitId : null
+                    ParentCommit = canUseTrackedState ? trackedState.CurrentCommitId : null,
+                    ParentCommit2 = canUseTrackedState ? trackedState.MergeParentCommitId : null
                 };
 
                 Commit commit = null;
@@ -257,6 +258,7 @@ namespace RevitVersionControl.Commands
                             ModelId = modelId,
                             CommitMessage = commitMessage,
                             ParentCommit = trackedState.CurrentCommitId,
+                            ParentCommit2 = trackedState.MergeParentCommitId,
                             Changes = changes,
                             ElementCount = extractedElements.Count,
                             PayloadRefs = payloadPreparation.PayloadRefs,
@@ -310,7 +312,7 @@ namespace RevitVersionControl.Commands
 
                 if (commit != null)
                 {
-                    DocumentSyncStateService.SaveState(doc.PathName, projectId, modelId, commit.CommitId, branchName);
+                    DocumentSyncStateService.SaveState(doc.PathName, projectId, modelId, commit.CommitId, branchName, null);
                     SnapshotCacheService.SaveSnapshot(projectId, modelId, commit.CommitId, snapshot);
 
                     string modeText = usedPackagePublish

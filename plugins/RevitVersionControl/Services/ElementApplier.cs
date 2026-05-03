@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -245,6 +245,18 @@ namespace RevitVersionControl.Services
                 {
                     TryEnsureRepoGuid(existing, change.RepoGuid);
                     _appliedCount++;
+                    return;
+                }
+
+                // Additional duplicate check: look for an element of the same type at the same location
+                // This prevents overlap errors when switching branches with the same physical elements
+                // that have different UniqueIds
+                Element locationDuplicate = FindExistingByTypeAndLocation(change);
+                if (locationDuplicate != null)
+                {
+                    TryEnsureRepoGuid(locationDuplicate, change.RepoGuid);
+                    _appliedCount++;
+                    _warnings.Add($"Add: Element {change.ElementId} already exists at location (mapped by type+location).");
                     return;
                 }
 
@@ -744,7 +756,92 @@ namespace RevitVersionControl.Services
             if (change == null)
                 return null;
 
-            return RepoGuidService.FindElement(_document, change.RepoGuid, change.ElementId);
+            // Try RepoGuid + UniqueId
+            Element el = RepoGuidService.FindElement(_document, change.RepoGuid, change.ElementId);
+            if (el != null) return el;
+
+            // Fallback: try numeric ID
+            if (!string.IsNullOrEmpty(change.ElementId) && long.TryParse(change.ElementId, out long numId))
+            {
+                try { el = _document.GetElement(new ElementId(numId)); } catch { }
+            }
+
+            return el;
+        }
+
+        /// <summary>
+        /// Find an existing element of the same category/type at approximately the same location.
+        /// This prevents duplicate creation when branches have the same physical element
+        /// with different UniqueIds.
+        /// </summary>
+        private Element FindExistingByTypeAndLocation(Change change)
+        {
+            if (change?.NewData == null) return null;
+
+            try
+            {
+                var newData = JObject.FromObject(change.NewData);
+                string category = newData["category"]?.ToString();
+                string typeName = newData["typeName"]?.ToString();
+                var locationObj = newData["location"] as JObject;
+                if (string.IsNullOrEmpty(category) || locationObj == null) return null;
+
+                string locType = locationObj["type"]?.ToString();
+                XYZ targetPoint = null;
+
+                if (locType == "point")
+                {
+                    var pt = locationObj["point"] as JObject;
+                    if (pt != null)
+                    {
+                        double.TryParse(pt["x"]?.ToString(), out double x);
+                        double.TryParse(pt["y"]?.ToString(), out double y);
+                        double.TryParse(pt["z"]?.ToString(), out double z);
+                        targetPoint = new XYZ(x, y, z);
+                    }
+                }
+                else if (locType == "curve")
+                {
+                    var sp = locationObj["startPoint"] as JObject;
+                    if (sp != null)
+                    {
+                        double.TryParse(sp["x"]?.ToString(), out double sx);
+                        double.TryParse(sp["y"]?.ToString(), out double sy);
+                        double.TryParse(sp["z"]?.ToString(), out double sz);
+                        targetPoint = new XYZ(sx, sy, sz);
+                    }
+                }
+
+                if (targetPoint == null) return null;
+
+                // Search for elements of the same category near this location
+                var collector = new FilteredElementCollector(_document)
+                    .WhereElementIsNotElementType()
+                    .WhereElementIsViewIndependent();
+
+                foreach (Element el in collector)
+                {
+                    if (el?.Category?.Name != category) continue;
+                    if (typeName != null && el.Name != typeName) continue;
+
+                    Location loc = el.Location;
+                    XYZ elPoint = null;
+
+                    if (loc is LocationPoint lp)
+                        elPoint = lp.Point;
+                    else if (loc is LocationCurve lc)
+                        elPoint = lc.Curve.GetEndPoint(0);
+
+                    if (elPoint == null) continue;
+
+                    // Check if within ~0.1 feet tolerance
+                    if (elPoint.DistanceTo(targetPoint) < 0.1)
+                        return el;
+                }
+            }
+            catch { }
+
+            return null;
         }
 
         private CreationResult TryCreateFromPayload(Change change, JObject newData)

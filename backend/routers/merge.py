@@ -1,19 +1,25 @@
-"""
+ï»¿"""
 Merge Router
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from entities.user_entity import User
 from dependencies import get_current_user
-from schemas.diff_schema import MergeRequest, MergeResult, PullRequest, PullResult
+from schemas.diff_schema import (
+    MergeRequest, MergeResult,
+    PullRequest, PullResult,
+    Merge3WayRequest, Merge3WayResult,
+)
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine
+from services.merge_resolution_applier import MergeResolutionApplier
 
 router = APIRouter()
 diff_engine = DiffEngine()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
+resolution_applier = MergeResolutionApplier()
 
 
 @router.post("/{project_id}/merge", response_model=MergeResult)
@@ -47,26 +53,46 @@ async def merge_commits(
         target_version=merge_request.targetCommit,
     )
 
-    conflicts = diff_engine.detect_conflicts(
+    mod_conflicts, auto_merged, both_deleted = diff_engine.detect_conflicts_with_auto_merged(
         local_changes=source_diff.changes,
         remote_changes=target_diff.changes,
     )
+    spatial_conflicts = diff_engine.detect_spatial_collisions(
+        source_changes=source_diff.changes,
+        target_changes=target_diff.changes,
+    )
+    all_conflicts = mod_conflicts + spatial_conflicts
 
-    if conflicts and not merge_request.resolutions:
+    # Return conflict list if there are unresolved conflicts and no resolutions given
+    if all_conflicts and not merge_request.resolutions:
         return MergeResult(
             mergeCommitId="",
             status="conflict",
             appliedChanges=0,
-            skippedChanges=0,
-            conflicts=conflicts,
+            skippedChanges=len(all_conflicts),
+            conflicts=all_conflicts,
         )
 
+    # Apply resolutions to produce the final merged changeset
+    merged_changes = resolution_applier.apply(
+        source_changes=source_diff.changes,
+        target_changes=target_diff.changes,
+        auto_merged=auto_merged,
+        both_deleted_ids=both_deleted,
+        conflicts=all_conflicts,
+        resolutions=merge_request.resolutions,
+    )
+    skipped = resolution_applier.count_skipped(all_conflicts, merge_request.resolutions)
+
+    # NOTE: merge commit persistence is not yet implemented.
+    # merged_changes contains the correct final changeset for when it is.
     return MergeResult(
-        mergeCommitId="merge-commit-id",
-        status="success",
-        appliedChanges=len(source_diff.changes) + len(target_diff.changes),
-        skippedChanges=0,
-        conflicts=[],
+        mergeCommitId="pending",        # placeholder until commit persistence is added
+        status="success" if skipped == 0 else "conflict",
+        appliedChanges=len(merged_changes),
+        skippedChanges=skipped,
+        conflicts=[c for c in all_conflicts
+                   if not any(r.elementId == c.elementId for r in merge_request.resolutions)],
     )
 
 
@@ -81,12 +107,6 @@ async def pull_changes(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # ------------------------------------------------------------------
-    # FAST PATH — walk the linear delta chain from target back to current.
-    # Covers both pulling a single next commit and pulling multiple commits
-    # at once (e.g. user on commit-100 pulling commit-105 after 5 pushes).
-    # Cost: one DB read per commit in the gap, no reconstruction at all.
-    # ------------------------------------------------------------------
     chain_changes = commit_repo.get_linear_chain_deltas(
         current_commit_id=pull_request.currentCommit,
         target_commit_id=pull_request.targetCommit,
@@ -94,29 +114,14 @@ async def pull_changes(
 
     if chain_changes is not None:
         if pull_request.selectiveElements:
-            chain_changes = [
-                c for c in chain_changes
-                if c.elementId in pull_request.selectiveElements
-            ]
-        return PullResult(
-            changes=chain_changes,
-            conflicts=[],
-            requiresResolution=False,
-        )
+            chain_changes = [c for c in chain_changes if c.elementId in pull_request.selectiveElements]
+        return PullResult(changes=chain_changes, conflicts=[], requiresResolution=False)
 
-    # ------------------------------------------------------------------
-    # SLOW PATH — non-linear range (cross-branch, skipped commits, or
-    # chain crossed a re-snapshot boundary).
-    # Reconstruct both states fully and diff them.
-    # ------------------------------------------------------------------
     current_snapshot = commit_repo.get_snapshot(pull_request.currentCommit)
     target_snapshot  = commit_repo.get_snapshot(pull_request.targetCommit)
 
     if not current_snapshot or not target_snapshot:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="One or more commits not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more commits not found")
 
     diff_result = diff_engine.compute_diff(
         base_elements=current_snapshot.elements,
@@ -133,4 +138,68 @@ async def pull_changes(
         changes=changes,
         conflicts=diff_result.conflicts,
         requiresResolution=len(diff_result.conflicts) > 0,
+    )
+
+
+@router.post("/{project_id}/merge3way", response_model=Merge3WayResult)
+async def merge_3way(
+    project_id: str,
+    request: Merge3WayRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """3-way merge analysis between two branch heads."""
+    project = project_repo.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    ancestor_id = commit_repo.find_common_ancestor(request.sourceCommitId, request.targetCommitId)
+    if not ancestor_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not find a common ancestor between the two commits.",
+        )
+
+    ancestor_snapshot = commit_repo.get_snapshot(ancestor_id)
+    source_snapshot   = commit_repo.get_snapshot(request.sourceCommitId)
+    target_snapshot   = commit_repo.get_snapshot(request.targetCommitId)
+
+    if not all([ancestor_snapshot, source_snapshot, target_snapshot]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Could not reconstruct snapshots for one or more commits.")
+
+    source_diff = diff_engine.compute_diff(
+        base_elements=ancestor_snapshot.elements,
+        target_elements=source_snapshot.elements,
+        base_version=ancestor_id,
+        target_version=request.sourceCommitId,
+    )
+    target_diff = diff_engine.compute_diff(
+        base_elements=ancestor_snapshot.elements,
+        target_elements=target_snapshot.elements,
+        base_version=ancestor_id,
+        target_version=request.targetCommitId,
+    )
+
+    # Full conflict analysis: mod conflicts + auto-merge + both-deleted
+    mod_conflicts, auto_merged, both_deleted = diff_engine.detect_conflicts_with_auto_merged(
+        local_changes=source_diff.changes,
+        remote_changes=target_diff.changes,
+    )
+
+    # Spatial collision analysis
+    spatial_conflicts = diff_engine.detect_spatial_collisions(
+        source_changes=source_diff.changes,
+        target_changes=target_diff.changes,
+    )
+
+    all_conflicts = mod_conflicts + spatial_conflicts
+
+    return Merge3WayResult(
+        commonAncestorId=ancestor_id,
+        sourceChanges=source_diff.changes,
+        targetChanges=target_diff.changes,
+        conflicts=all_conflicts,
+        hasConflicts=len(all_conflicts) > 0,
+        autoMergedChanges=auto_merged,          # safe, no user action needed
+        bothDeletedElements=both_deleted,        # informational, agreed deletes
     )

@@ -7,6 +7,7 @@ Title="Changes &amp; Merge">
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -23,9 +24,10 @@ Title="Changes &amp; Merge">
             </StackPanel>
         </Border>
 
-        <!-- Changes List -->
-        <Grid Grid.Row="1">
+        <!-- Changes List (Hidden during preview) -->
+        <Grid Grid.Row="1" x:Name="ListModeGrid">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
@@ -38,12 +40,29 @@ Title="Changes &amp; Merge">
                     <TextBlock Text="Modified: " FontWeight="Bold"/>
                     <TextBlock x:Name="ModifiedCountText" Text="0" Foreground="Orange" Margin="0,0,15,0"/>
                     <TextBlock Text="Deleted: " FontWeight="Bold"/>
-                    <TextBlock x:Name="DeletedCountText" Text="0" Foreground="Red"/>
+                    <TextBlock x:Name="DeletedCountText" Text="0" Foreground="Red" Margin="0,0,15,0"/>
+                    <TextBlock Text="Conflicts: " FontWeight="Bold"/>
+                    <TextBlock x:Name="ConflictCountText" Text="0" Foreground="Magenta"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Conflict Banner -->
+            <Border Grid.Row="1" x:Name="ConflictBanner" Background="#FFF3CD" Padding="10" 
+                    BorderThickness="0,0,0,1" BorderBrush="#FFD700" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="⚠ MERGE CONFLICTS DETECTED" FontWeight="Bold" Foreground="#856404" FontSize="13"/>
+                    <TextBlock x:Name="ConflictBannerText" Text="Resolve conflicts in Preview Mode before finalizing."
+                               Foreground="#856404" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
             </Border>
 
             <!-- Change Items -->
-            <ListView Grid.Row="1" Name="ChangesListView" SelectionMode="Multiple">
+            <ListView Grid.Row="2" Name="ChangesListView" SelectionMode="Single">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate>
                         <Border Padding="10" BorderThickness="0,0,0,1" BorderBrush="#E0E0E0">
@@ -54,7 +73,8 @@ Title="Changes &amp; Merge">
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                          VerticalAlignment="Center" ToolTip="Accept/Reject this change"/>
 
                                 <Border Grid.Column="1" Width="40" Height="20" CornerRadius="3"
                                         Background="{Binding StatusColor}" VerticalAlignment="Center">
@@ -75,19 +95,75 @@ Title="Changes &amp; Merge">
             </ListView>
         </Grid>
 
+        <!-- Preview Mode UI (Hidden initially) — NO ScrollViewer to avoid event-swallowing -->
+        <StackPanel Grid.Row="1" x:Name="PreviewModeGrid" Visibility="Collapsed" Background="#F8F8F8" Margin="15">
+            <TextBlock Text="Visual Preview Active" FontWeight="Bold" FontSize="14" Foreground="#007ACC" Margin="0,0,0,10"/>
+            <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,0,0,10">
+                <Run Text="Green = Added | Orange = Modified | Red = Deleted"/>
+                <LineBreak/>
+                <Run Text="Magenta = Conflict | Purple = Spatial Collision"/>
+            </TextBlock>
+                       
+            <Border Background="White" BorderBrush="#DDD" BorderThickness="1" CornerRadius="5" Padding="15">
+                <StackPanel>
+                    <TextBlock x:Name="PreviewChangeCounter" Text="Reviewing Change 1 of 5" FontWeight="Bold" Margin="0,0,0,10"/>
+                
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Border x:Name="PreviewStatusBadge" Width="50" Height="22" CornerRadius="3" Background="Gray">
+                            <TextBlock x:Name="PreviewStatusText" Text="-" Foreground="White" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock x:Name="PreviewElementType" Text="Element Type" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                
+                    <TextBlock x:Name="PreviewElementDetails" Text="Details here..." TextWrapping="Wrap" Foreground="DarkGray" Margin="0,0,0,10"/>
+                
+                    <CheckBox x:Name="PreviewAcceptCheckbox" Content="Include this change" FontWeight="Bold" 
+                              Foreground="DarkGreen" IsChecked="True" 
+                              Checked="PreviewAcceptCheckbox_Changed" Unchecked="PreviewAcceptCheckbox_Changed"/>
+                
+                    <!-- Conflict panel -->
+                    <Border x:Name="PreviewConflictPanel" Background="#FFF3CD" BorderBrush="#FFD700" 
+                            BorderThickness="1" CornerRadius="5" Padding="10" Margin="0,10,0,0" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="⚠ CONFLICT" FontWeight="Bold" Foreground="#856404" FontSize="13" Margin="0,0,0,5"/>
+                            <TextBlock x:Name="PreviewConflictDescription" Text="" TextWrapping="Wrap" Foreground="#856404" FontSize="11" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="ConflictKeepOurs" Content="Keep Ours" GroupName="PreviewConflict" IsChecked="True" Margin="0,0,15,0" Checked="ConflictResolution_Changed"/>
+                                <RadioButton x:Name="ConflictKeepTheirs" Content="Keep Theirs" GroupName="PreviewConflict" Margin="0,0,15,0" Checked="ConflictResolution_Changed"/>
+                                <RadioButton x:Name="ConflictKeepBoth" Content="Keep Both" GroupName="PreviewConflict" Visibility="Collapsed" Checked="ConflictResolution_Changed"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- Navigation row (only in preview mode) — OUTSIDE of preview content, in its own Grid.Row -->
+        <StackPanel Grid.Row="2" x:Name="PreviewNavPanel" Orientation="Horizontal" HorizontalAlignment="Center" 
+                    Visibility="Collapsed" Margin="5">
+            <Button Content="◄ Previous" Width="90" Height="30" Margin="0,0,10,0" Click="PrevChange_Click"/>
+            <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,10,0" Click="ZoomElement_Click"/>
+            <Button Content="Next ►" Width="90" Height="30" Click="NextChange_Click"/>
+        </StackPanel>
+
         <!-- Action Buttons -->
-        <Border Grid.Row="2" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Select All" Width="100" Height="30" Margin="0,0,5,0"
-						Click="SelectAll_Click"/>
-                <Button Content="Deselect All" Width="100" Height="30" Margin="0,0,15,0"
-						Click="DeselectAll_Click"/>
-                <Button Content="Highlight in View" Width="120" Height="30" Margin="0,0,15,0"
-                        Background="#FFD700" Click="Highlight_Click"/>
-                <Button Content="Apply Selected" Width="120" Height="30"
-                        Background="#28A745" Foreground="White" FontWeight="Bold"
-						Click="ApplySelected_Click"/>
-            </StackPanel>
+        <Border Grid.Row="3" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
+            <Grid>
+                <StackPanel x:Name="ListActionPanel" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,15,0"
+                            Click="ZoomElement_Click"/>
+                    <Button x:Name="StartMergeButton" Content="Start Visual Merge" Width="140" Height="30" Margin="0,0,15,0"
+                            Background="#007ACC" Foreground="White" FontWeight="Bold" Click="StartVisualMerge_Click"
+                            IsEnabled="False" Visibility="Collapsed"/>
+                </StackPanel>
+                
+                <StackPanel x:Name="PreviewActionPanel" Orientation="Horizontal" HorizontalAlignment="Right" Visibility="Collapsed">
+                    <Button Content="Cancel Preview" Width="120" Height="30" Margin="0,0,15,0"
+                            Background="#DC3545" Foreground="White" Click="CancelPreview_Click"/>
+                    <Button Content="Finalize Merge" Width="130" Height="30"
+                            Background="#28A745" Foreground="White" FontWeight="Bold" Click="FinalizeMerge_Click"/>
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Page>

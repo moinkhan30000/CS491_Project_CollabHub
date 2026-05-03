@@ -9,6 +9,7 @@ class CommitCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: Optional[str] = None
+    parentCommit2: Optional[str] = None
     branchName: Optional[str] = None
     snapshot: ElementSnapshot
 
@@ -17,6 +18,7 @@ class CommitPackageCreate(BaseModel):
     modelId: str
     commitMessage: str
     parentCommit: str
+    parentCommit2: Optional[str] = None
     branchName: Optional[str] = None
     changes: List[Change]
     elementCount: int
@@ -35,6 +37,7 @@ class CommitDetail(BaseModel):
     author: Union[AuthorInfo, str, Dict[str, Any]]
     timestamp: datetime
     parentCommit: Optional[str] = None
+    parentCommit2: Optional[str] = None
     elementCount: int
     changedElements: int
     
@@ -50,6 +53,7 @@ class CommitSummary(BaseModel):
     author: Union[AuthorInfo, str, Dict[str, Any]]
     timestamp: datetime
     parentCommit: Optional[str] = None
+    parentCommit2: Optional[str] = None
     elementCount: int
     changedElements: int
     commitId: str

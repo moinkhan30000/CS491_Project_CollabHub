@@ -133,6 +133,31 @@ namespace RevitVersionControl.UI
                     };
                     GraphCanvas.Children.Add(line);
                 }
+
+                if (!string.IsNullOrEmpty(c.ParentCommit2) && nodeCoords.ContainsKey(c.ParentCommit2))
+                {
+                    var parentPt2 = nodeCoords[c.ParentCommit2];
+                    var childPt = nodeCoords[c.CommitId];
+
+                    // Find the branch of the second parent to color the line
+                    var parent2Commit = commits.FirstOrDefault(x => x.CommitId == c.ParentCommit2);
+                    string bName2 = parent2Commit != null && !string.IsNullOrEmpty(parent2Commit.BranchName) ? parent2Commit.BranchName : "main";
+                    int lane2 = branchLanes.ContainsKey(bName2) ? branchLanes[bName2] : 0;
+                    var brush2 = laneColors[lane2 % laneColors.Length];
+
+                    var line2 = new Line
+                    {
+                        X1 = parentPt2.X,
+                        Y1 = parentPt2.Y,
+                        X2 = childPt.X,
+                        Y2 = childPt.Y,
+                        Stroke = brush2,
+                        StrokeThickness = 2,
+                        StrokeDashArray = new DoubleCollection { 4, 2 },
+                        Opacity = 0.6
+                    };
+                    GraphCanvas.Children.Add(line2);
+                }
             }
 
             // 4. Draw Nodes

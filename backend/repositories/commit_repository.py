@@ -1,6 +1,6 @@
 from datetime import datetime
 import uuid
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Set
 
 from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session, select
@@ -43,6 +43,7 @@ class CommitRepository:
         element_count: Optional[int] = None,
         changed_elements: Optional[int] = None,
         branch_name: Optional[str] = None,
+        parent_commit2: Optional[str] = None,
     ) -> Commit:
         """
         Create a commit storing either a full snapshot (root / checkpoint)
@@ -90,6 +91,7 @@ class CommitRepository:
                 ),
                 snapshot=payload,
                 branchName=branch_name,
+                parentCommit2=parent_commit2,
             )
 
             project = session.get(Project, project_id)
@@ -340,3 +342,63 @@ class CommitRepository:
             return [Change(**c) for c in commit.snapshot]
 
         return None
+
+    # ------------------------------------------------------------------
+    # Ancestry
+    # ------------------------------------------------------------------
+
+    def find_common_ancestor(
+        self, commit_a_id: str, commit_b_id: str
+    ) -> Optional[str]:
+        """
+        Find the common ancestor (merge base) of two commits by walking
+        both parent chains simultaneously. Returns the commitId of the
+        first common ancestor found, or None if no ancestor is shared
+        (shouldn't happen in a well-formed repository).
+        """
+        if commit_a_id == commit_b_id:
+            return commit_a_id
+
+        visited_a: Set[str] = set()
+        visited_b: Set[str] = set()
+        frontier_a = [commit_a_id]
+        frontier_b = [commit_b_id]
+        steps = 0
+
+        while (frontier_a or frontier_b) and steps < _MAX_CHAIN_WALK:
+            # Expand frontier A
+            if frontier_a:
+                next_frontier_a = []
+                for cid in frontier_a:
+                    if cid in visited_b:
+                        return cid
+                    visited_a.add(cid)
+                    with Session(engine) as session:
+                        commit = session.get(Commit, cid)
+                    if commit:
+                        if commit.parentCommit and commit.parentCommit not in visited_a:
+                            next_frontier_a.append(commit.parentCommit)
+                        if commit.parentCommit2 and commit.parentCommit2 not in visited_a:
+                            next_frontier_a.append(commit.parentCommit2)
+                frontier_a = next_frontier_a
+
+            # Expand frontier B
+            if frontier_b:
+                next_frontier_b = []
+                for cid in frontier_b:
+                    if cid in visited_a:
+                        return cid
+                    visited_b.add(cid)
+                    with Session(engine) as session:
+                        commit = session.get(Commit, cid)
+                    if commit:
+                        if commit.parentCommit and commit.parentCommit not in visited_b:
+                            next_frontier_b.append(commit.parentCommit)
+                        if commit.parentCommit2 and commit.parentCommit2 not in visited_b:
+                            next_frontier_b.append(commit.parentCommit2)
+                frontier_b = next_frontier_b
+
+            steps += 1
+
+        return None
+
