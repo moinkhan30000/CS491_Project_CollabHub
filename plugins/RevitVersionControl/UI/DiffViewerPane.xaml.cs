@@ -692,13 +692,30 @@ namespace RevitVersionControl.UI
                 return;
             }
 
-            var selectedRepoGuids = new HashSet<string>(
-                _allRows.Where(r => r.IsSelected && !string.IsNullOrEmpty(r.RepoGuid))
-                        .Select(r => r.RepoGuid), StringComparer.OrdinalIgnoreCase);
+            // Build selected changes using index-based matching.
+            // _allRows[i] corresponds 1:1 to _lastDiffResult.Changes[i] because
+            // DiffViewService.Build() iterates changes in order and LoadResult()
+            // copies rows in order.
+            var selectedChanges = new List<Change>();
+            int changeCount = _lastDiffResult.Changes.Count;
+            for (int i = 0; i < _allRows.Count && i < changeCount; i++)
+            {
+                if (_allRows[i].IsSelected)
+                    selectedChanges.Add(_lastDiffResult.Changes[i]);
+            }
 
-            var selectedChanges = _lastDiffResult.Changes
-                .Where(c => selectedRepoGuids.Contains(c.RepoGuid ?? ""))
-                .ToList();
+            // Fallback: also try RepoGuid matching for rows beyond the index range
+            // (shouldn't happen, but defensive)
+            if (selectedChanges.Count == 0)
+            {
+                var selectedRepoGuids = new HashSet<string>(
+                    _allRows.Where(r => r.IsSelected && !string.IsNullOrEmpty(r.RepoGuid))
+                            .Select(r => r.RepoGuid), StringComparer.OrdinalIgnoreCase);
+
+                selectedChanges = _lastDiffResult.Changes
+                    .Where(c => !string.IsNullOrEmpty(c.RepoGuid) && selectedRepoGuids.Contains(c.RepoGuid))
+                    .ToList();
+            }
 
             if (selectedChanges.Count == 0)
             {
