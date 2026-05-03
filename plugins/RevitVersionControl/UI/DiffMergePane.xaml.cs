@@ -13,7 +13,8 @@ namespace RevitVersionControl.UI
     public enum DiffMergeMode
     {
         Resolution,
-        ViewOnly
+        ViewOnly,
+        HistoricalViewer
     }
 
     public partial class DiffMergePane : Page
@@ -71,8 +72,6 @@ namespace RevitVersionControl.UI
             {
                 StartMergeButton.IsEnabled = false;
                 StartMergeButton.Visibility = Visibility.Collapsed;
-                ApplyMergeButton.IsEnabled = false;
-                ApplyMergeButton.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -95,6 +94,7 @@ namespace RevitVersionControl.UI
             _currentProjectId = null;
             _isMergeMode = false;
             _currentConflicts.Clear();
+            PreviewStateService.Is3WayMerge = false;
             BaseCommitText.Text = diffResult.BaseVersion ?? "-";
             TargetCommitText.Text = diffResult.TargetVersion ?? "-";
 
@@ -110,7 +110,9 @@ namespace RevitVersionControl.UI
 
             _currentChanges = diffResult.Changes ?? new List<Change>();
             ChangesListView.ItemsSource = BuildChangeItems(_currentChanges, _currentConflicts);
-            UpdateMergeButtonVisibility();
+            
+            // Set mode to Resolution so user can select/apply changes
+            SetMode(DiffMergeMode.Resolution);
         }
 
         public void LoadPullResult(PullResult pullResult, string projectId = null, string currentCommitId = null, string targetCommitId = null, string modelId = null)
@@ -135,6 +137,58 @@ namespace RevitVersionControl.UI
 
             _currentChanges = new List<Change>(pullResult.Changes ?? new List<Change>());
             ChangesListView.ItemsSource = BuildChangeItems(_currentChanges, _currentConflicts);
+            UpdateMergeButtonVisibility();
+        }
+
+        public void LoadHistoricalMergeResult(HistoricalMergeResult result, string projectId, string commitId)
+        {
+            if (result == null) { Clear(); return; }
+
+            CurrentMode = DiffMergeMode.HistoricalViewer;
+            _currentProjectId = projectId;
+            _currentTargetCommitId = commitId;
+            _isMergeMode = false;
+            PreviewStateService.Is3WayMerge = true;
+            BaseCommitText.Text = result.ParentCommitId ?? "-";
+            TargetCommitText.Text = result.ParentCommitId2 ?? "-";
+
+            _currentConflicts = new List<Conflict>(result.Conflicts ?? new List<Conflict>());
+            _currentChanges = new List<Change>(); // Historically we only care about conflicts for the viewer
+            
+            ConflictCountText.Text = _currentConflicts.Count.ToString();
+            AddedCountText.Text = "-";
+            ModifiedCountText.Text = "-";
+            DeletedCountText.Text = "-";
+
+            if (_currentConflicts.Count > 0)
+            {
+                ConflictBanner.Visibility = Visibility.Visible;
+                ConflictBannerText.Text = $"Historical view: {_currentConflicts.Count} conflict(s) resolved in this merge.";
+            }
+            else
+            {
+                ConflictBanner.Visibility = Visibility.Collapsed;
+            }
+
+            var items = BuildChangeItems(_currentChanges, _currentConflicts);
+            
+            // Auto-select radio buttons based on resolutions
+            if (result.Resolutions != null)
+            {
+                foreach (var item in items)
+                {
+                    if (item.IsConflict)
+                    {
+                        var resolution = result.Resolutions.FirstOrDefault(r => r.ElementId == item.ConflictId);
+                        if (resolution != null)
+                        {
+                            item.Resolution = resolution.ResolutionType; // "keep_local" or "accept_remote"
+                        }
+                    }
+                }
+            }
+
+            ChangesListView.ItemsSource = items;
             UpdateMergeButtonVisibility();
         }
 
@@ -164,6 +218,10 @@ namespace RevitVersionControl.UI
 
             _currentConflicts = new List<Conflict>(result.Conflicts ?? new List<Conflict>());
             _currentChanges = new List<Change>(result.TargetChanges ?? new List<Change>());
+            if (result.AutoMergedChanges != null)
+            {
+                _currentChanges.AddRange(result.AutoMergedChanges);
+            }
 
             var summary = Summarize(_currentChanges);
             AddedCountText.Text = summary.added.ToString();
@@ -391,12 +449,8 @@ namespace RevitVersionControl.UI
 
                             if (shouldAccept)
                             {
-                                var change = _currentChanges.FirstOrDefault(c => c.ElementId == item.ElementId);
-                                if (change != null)
-                                {
-                                    string key = PreviewStateService.GetChangeTrackingKey(change);
-                                    if (!string.IsNullOrEmpty(key)) acceptedKeys.Add(key);
-                                }
+                                if (!string.IsNullOrEmpty(item.TrackingKey))
+                                    acceptedKeys.Add(item.TrackingKey);
                             }
                         }
                     }
@@ -427,9 +481,12 @@ namespace RevitVersionControl.UI
             try
             {
                 var acceptedKeys = new List<string>();
-                if (result.TargetChanges != null)
+                var changesToApply = new List<Change>(result.TargetChanges ?? new List<Change>());
+                if (result.AutoMergedChanges != null) changesToApply.AddRange(result.AutoMergedChanges);
+
+                if (changesToApply.Count > 0)
                 {
-                    foreach (var change in result.TargetChanges)
+                    foreach (var change in changesToApply)
                     {
                         string key = PreviewStateService.GetChangeTrackingKey(change);
                         if (!string.IsNullOrEmpty(key)) acceptedKeys.Add(key);
@@ -444,7 +501,7 @@ namespace RevitVersionControl.UI
                         ProjectId = projectId,
                         TargetCommitId = targetCommitId,
                         ModelId = modelId,
-                        Changes = new List<Change>(result.TargetChanges ?? new List<Change>())
+                        Changes = changesToApply
                     },
                     AcceptedChangeKeys = acceptedKeys
                 });
@@ -642,9 +699,17 @@ namespace RevitVersionControl.UI
                 string savedRes = null;
                 PreviewStateService.ConflictResolutions.TryGetValue(item.ConflictId ?? item.ElementId, out savedRes);
 
+                ConflictKeepOurs.Checked -= ConflictResolution_Changed;
+                ConflictKeepTheirs.Checked -= ConflictResolution_Changed;
+                ConflictKeepBoth.Checked -= ConflictResolution_Changed;
+
                 ConflictKeepOurs.IsChecked = savedRes != "accept_remote" && savedRes != "keep_both";
                 ConflictKeepTheirs.IsChecked = savedRes == "accept_remote";
                 ConflictKeepBoth.IsChecked = savedRes == "keep_both";
+
+                ConflictKeepOurs.Checked += ConflictResolution_Changed;
+                ConflictKeepTheirs.Checked += ConflictResolution_Changed;
+                ConflictKeepBoth.Checked += ConflictResolution_Changed;
             }
             else
             {
@@ -707,6 +772,8 @@ namespace RevitVersionControl.UI
                     Description = conflict != null ? conflict.Description : BuildDescription(change),
                     Details = BuildDetails(change),
                     ElementId = change.ElementId,
+                    RepoGuid = change.RepoGuid,
+                    TrackingKey = PreviewStateService.GetChangeTrackingKey(change),
                     IsSelected = true,
                     IsConflict = conflict != null,
                     ConflictType = conflict?.ConflictType,
@@ -788,18 +855,16 @@ namespace RevitVersionControl.UI
                 PreviewActionPanel.Visibility = Visibility.Visible;
                 ListActionPanel.Visibility = Visibility.Collapsed;
                 
-                // Disable resolution buttons if in ViewOnly mode
-                if (CurrentMode == DiffMergeMode.ViewOnly)
+                // Disable resolution controls if in ViewOnly or HistoricalViewer mode
+                bool isResolutionEnabled = CurrentMode == DiffMergeMode.Resolution;
+                PreviewAcceptCheckbox.IsEnabled = isResolutionEnabled;
+                ConflictKeepOurs.IsEnabled = isResolutionEnabled;
+                ConflictKeepTheirs.IsEnabled = isResolutionEnabled;
+                ConflictKeepBoth.IsEnabled = isResolutionEnabled;
+                
+                if (FinalizeMergeButton != null)
                 {
-                    KeepLocalButton.Visibility = Visibility.Collapsed;
-                    AcceptRemoteButton.Visibility = Visibility.Collapsed;
-                    KeepBothButton.Visibility = Visibility.Collapsed;
-                }
-                else
-                {
-                    KeepLocalButton.Visibility = Visibility.Visible;
-                    AcceptRemoteButton.Visibility = Visibility.Visible;
-                    KeepBothButton.Visibility = Visibility.Visible;
+                    FinalizeMergeButton.Visibility = (CurrentMode == DiffMergeMode.HistoricalViewer) ? Visibility.Collapsed : Visibility.Visible;
                 }
             }
             else
@@ -853,12 +918,14 @@ namespace RevitVersionControl.UI
             public string Details { get; set; }
             public string ElementId { get; set; }
             public string RepoGuid { get; set; }
+            public string TrackingKey { get; set; }
 
             // Conflict fields
             public bool IsConflict { get; set; }
             public string ConflictType { get; set; }
             public string ConflictId { get; set; }
             public string ConflictDescription { get; set; }
+            public string Resolution { get; set; }
 
             public bool IsSelected
             {

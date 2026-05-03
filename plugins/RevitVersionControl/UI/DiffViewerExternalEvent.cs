@@ -9,7 +9,8 @@ namespace RevitVersionControl.UI
         Build,
         Clear,
         CleanOrphans,
-        ZoomTo
+        ZoomTo,
+        ApplySelected
     }
 
     public class DiffViewerRequest
@@ -21,6 +22,11 @@ namespace RevitVersionControl.UI
         public Guid? SessionId { get; set; }
         public Action<DiffViewBuildResult> OnBuildComplete { get; set; }
         public Action OnClearComplete { get; set; }
+
+        // Apply Selected
+        public System.Collections.Generic.List<Change> ApplyChanges { get; set; }
+        public string ApplyProjectId { get; set; }
+        public Action<ElementApplier.ApplyResult> OnApplyComplete { get; set; }
     }
 
     public class DiffViewerExternalEvent : IExternalEventHandler
@@ -85,6 +91,30 @@ namespace RevitVersionControl.UI
                         {
                             try { app.ActiveUIDocument.ShowElements(request.TargetElementId); }
                             catch { }
+                        }
+                        break;
+
+                    case DiffViewerOperation.ApplySelected:
+                        if (request.ApplyChanges != null && request.ApplyChanges.Count > 0)
+                        {
+                            var doc = app.ActiveUIDocument.Document;
+                            string projId = request.ApplyProjectId ?? "";
+
+                            // Ensure payloads are available
+                            if (!PayloadSupportService.EnsurePayloadsAvailable(projId, request.ApplyChanges, out string payloadErr))
+                            {
+                                var failResult = new ElementApplier.ApplyResult
+                                {
+                                    Success = false,
+                                    Summary = payloadErr ?? "Failed to download required payloads."
+                                };
+                                try { request.OnApplyComplete?.Invoke(failResult); } catch { }
+                                break;
+                            }
+
+                            var applier = new ElementApplier(doc, projId);
+                            var applyResult = applier.ApplyChanges(request.ApplyChanges);
+                            try { request.OnApplyComplete?.Invoke(applyResult); } catch { }
                         }
                         break;
                 }

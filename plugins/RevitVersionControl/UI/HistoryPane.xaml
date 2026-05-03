@@ -4,6 +4,10 @@
       Title="Version History">
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <ContextMenu x:Key="CommitContextMenu">
+            <MenuItem Header="View Merge Decisions" Click="ViewMergeDecisions_Click"/>
+            <MenuItem Header="Compare Selected Commits" Click="CompareCommits_Click"/>
+        </ContextMenu>
     </Page.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -41,6 +45,11 @@
 
         <!-- Commit List -->
         <ListView Grid.Row="1" x:Name="CommitListView" BorderThickness="0">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="ContextMenu" Value="{StaticResource CommitContextMenu}"/>
+                </Style>
+            </ListView.ItemContainerStyle>
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Commit" Width="250">

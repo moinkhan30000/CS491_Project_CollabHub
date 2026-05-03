@@ -154,6 +154,7 @@ namespace RevitVersionControl.UI
                         BranchName = string.IsNullOrEmpty(commit.BranchName) ? "-" : commit.BranchName,
                         Author = commit.GetAuthorName(),
                         Timestamp = commit.Timestamp.ToString("yyyy-MM-dd HH:mm"),
+                        RawTimestamp = commit.Timestamp,
                         ChangedElements = commit.ChangedElements,
                         IsActive = (commit.CommitId == currentCommitId)
                     });
@@ -289,40 +290,49 @@ namespace RevitVersionControl.UI
                         {
                             try
                             {
-                                // Use 3-way merge for proper conflict detection
-                                var mergeResult = await _apiClient.Merge3WayAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
-                                if (mergeResult != null)
+                                // Fetch the diff between current commit and the merge target
+                                var diffResult = await _apiClient.GetDiffAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
+                                
+                                if (diffResult == null || diffResult.Changes == null || diffResult.Changes.Count == 0)
                                 {
-                                    if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
-                                    {
-                                        DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, project.ProjectId, hint.ModelId, currentCommitId, hint.CurrentBranchName, targetBranchObj.HeadCommitId);
-                                    }
+                                    MessageBox.Show("No differences found between your current commit and the target branch. Nothing to merge.", "Merge", MessageBoxButton.OK, MessageBoxImage.Information);
+                                }
+                                else
+                                {
+                                    // Store the diff result in the DiffViewerPane for the user to review
+                                    DiffViewerPaneProvider.Instance?.LoadDiffForMerge(diffResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, branchToMerge);
                                     
-                                    if (mergeResult.HasConflicts)
+                                    // Also check for conflicts using 3-way merge
+                                    bool hasConflicts = false;
+                                    int conflictCount = 0;
+                                    try
                                     {
-                                        DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
-                                        DiffMergePaneProvider.Instance?.SetMode(DiffMergeMode.Resolution);
-                                        MessageBox.Show($"3-way merge analysis loaded into Changes & Merge Pane.\n\n{mergeResult.Conflicts.Count} CONFLICT(S) detected! Please open the pane to review and finalize.", "Merge Initiated", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                        var mergeResult = await _apiClient.Merge3WayAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
+                                        if (mergeResult != null && mergeResult.HasConflicts)
+                                        {
+                                            hasConflicts = true;
+                                            conflictCount = mergeResult.Conflicts?.Count ?? 0;
+                                        }
+                                    }
+                                    catch { /* 3-way merge check failed, proceed with diff-based merge */ }
+
+                                    string message;
+                                    if (hasConflicts)
+                                    {
+                                        message = $"⚠️ {conflictCount} CONFLICT(S) detected!\n\n" +
+                                            $"Found {diffResult.Changes.Count} total change(s) between your branch and '{branchToMerge}'.\n\n" +
+                                            "The Diff Viewer has been opened with all changes listed.\n" +
+                                            "Use the CHECKBOXES to select which changes you want to apply, then click 'Apply Selected Changes'.";
                                     }
                                     else
                                     {
-                                        var previewResult = MessageBox.Show(
-                                            "Merge successful without conflicts.\nWould you like to review the changes in the 3D viewer before applying?", 
-                                            "Merge Complete", 
-                                            MessageBoxButton.YesNo, 
-                                            MessageBoxImage.Question);
-
-                                        if (previewResult == MessageBoxResult.Yes)
-                                        {
-                                            DiffMergePaneProvider.Instance?.LoadMerge3WayResult(mergeResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, hint?.ModelId);
-                                            DiffMergePaneProvider.Instance?.SetMode(DiffMergeMode.ViewOnly);
-                                            MessageBox.Show("Changes loaded into the Changes & Merge Pane in View Only mode.", "Preview Ready", MessageBoxButton.OK, MessageBoxImage.Information);
-                                        }
-                                        else
-                                        {
-                                            DiffMergePaneProvider.Instance?.AutoFinalizeCleanMerge(mergeResult, project.ProjectId, targetBranchObj.HeadCommitId, hint?.ModelId);
-                                        }
+                                        message = $"Found {diffResult.Changes.Count} change(s) to merge from '{branchToMerge}'.\n\n" +
+                                            "The Diff Viewer has been opened with all changes listed.\n" +
+                                            "Review the changes, adjust selections if needed, then click 'Apply Selected Changes'.";
                                     }
+
+                                    MessageBox.Show(message, "Merge Analysis", MessageBoxButton.OK, 
+                                        hasConflicts ? MessageBoxImage.Warning : MessageBoxImage.Information);
                                 }
                             }
                             catch (Exception ex)
@@ -351,6 +361,100 @@ namespace RevitVersionControl.UI
             }
         }
 
+        private async void ViewMergeDecisions_Click(object sender, RoutedEventArgs e)
+        {
+            var menuItem = sender as MenuItem;
+            if (menuItem == null) return;
+
+            var contextMenu = menuItem.Parent as ContextMenu;
+            if (contextMenu == null) return;
+
+            var listViewItem = contextMenu.PlacementTarget as ListViewItem;
+            if (listViewItem == null) return;
+
+            var commitItem = listViewItem.Content as CommitItem;
+            if (commitItem == null || string.IsNullOrEmpty(commitItem.CommitId)) return;
+
+            if (ProjectComboBox.SelectedItem is Project project)
+            {
+                try
+                {
+                    System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+                    var decisions = await _apiClient.GetHistoricalMergeDecisionsAsync(project.ProjectId, commitItem.CommitId);
+                    
+                    if (decisions == null || string.IsNullOrEmpty(decisions.ParentCommitId2))
+                    {
+                        MessageBox.Show("This commit is not a merge commit.", "Historical Viewer", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    DiffMergePaneProvider.Instance?.LoadHistoricalMergeResult(decisions, project.ProjectId, commitItem.CommitId);
+                    
+                    // Show the DiffMergePane pane
+                    var paneId = new Autodesk.Revit.UI.DockablePaneId(new Guid("87654321-4321-4321-4321-210987654321"));
+                    var diffPane = Autodesk.Revit.UI.RevitCommandId.LookupCommandId("CustomCtrl_%CustomCtrl_%CollabHub%Version Control%DiffMergePane");
+                    // Can't show dockable pane directly from UI thread easily unless we have an ExternalEvent or it's already shown
+                    // but we can ask the user to open it
+                    MessageBox.Show("Merge decisions loaded.\n\nPlease open the 'Changes & Merge' pane from the Version Control tab in the Ribbon to view them.", "Historical Viewer", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to load merge decisions: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    System.Windows.Input.Mouse.OverrideCursor = null;
+                }
+            }
+        }
+
+        private async void CompareCommits_Click(object sender, RoutedEventArgs e)
+        {
+            var selectedItems = CommitListView.SelectedItems.Cast<CommitItem>().ToList();
+            if (selectedItems.Count != 2)
+            {
+                MessageBox.Show("Please select exactly 2 commits to compare.\n(Hold Ctrl or Shift while clicking to select multiple).", "Compare Commits", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var commitA = selectedItems[0];
+            var commitB = selectedItems[1];
+
+            if (string.IsNullOrEmpty(commitA.CommitId) || string.IsNullOrEmpty(commitB.CommitId))
+                return;
+
+            // The older commit should be the base, the newer should be the target
+            var baseCommit = commitA.RawTimestamp < commitB.RawTimestamp ? commitA : commitB;
+            var targetCommit = commitA.RawTimestamp < commitB.RawTimestamp ? commitB : commitA;
+
+            var project = ProjectComboBox.SelectedItem as Project;
+            if (project == null) return;
+
+            try
+            {
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+                var diffResult = await _apiClient.GetDiffAsync(project.ProjectId, baseCommit.CommitId, targetCommit.CommitId);
+                
+                if (diffResult != null)
+                {
+                    DiffMergePaneProvider.Instance?.LoadDiffResult(diffResult);
+                    MessageBox.Show($"Loaded comparison between {baseCommit.CommitId.Substring(0, 8)} and {targetCommit.CommitId.Substring(0, 8)}.\n\nPlease open the 'Changes & Merge' pane from the Version Control tab in the Ribbon to view and apply the changes.", "Compare Commits", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show("Failed to retrieve comparison.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error comparing commits: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                System.Windows.Input.Mouse.OverrideCursor = null;
+            }
+        }
+
         private class CommitItem
         {
             public string Message { get; set; }
@@ -358,6 +462,7 @@ namespace RevitVersionControl.UI
             public string BranchName { get; set; }
             public string Author { get; set; }
             public string Timestamp { get; set; }
+            public DateTime RawTimestamp { get; set; }
             public int ChangedElements { get; set; }
             public bool IsActive { get; set; }
         }

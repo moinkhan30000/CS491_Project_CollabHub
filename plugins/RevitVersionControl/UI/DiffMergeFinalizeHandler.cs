@@ -183,8 +183,11 @@ namespace RevitVersionControl.UI
                             try
                             {
                                 Element el = RepoGuidService.FindElement(doc, change.RepoGuid, change.ElementId);
-                                if (el != null && !el.Pinned)
+                                if (el != null)
+                                {
+                                    if (el.Pinned) el.Pinned = false;
                                     doc.Delete(el.Id);
+                                }
                             }
                             catch { }
                         }

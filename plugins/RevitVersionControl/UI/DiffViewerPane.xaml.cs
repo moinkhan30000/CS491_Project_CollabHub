@@ -17,6 +17,7 @@ namespace RevitVersionControl.UI
         private List<DiffRow> _allRows = new List<DiffRow>();
         private ElementId _diffViewId;
         private Guid _sessionId = Guid.Empty;
+        private DiffResult _lastDiffResult;  // stored for Apply Selected
 
         // Hint state used to auto-select the user's current commit when projects/branches load.
         private string _autoSelectCommitId;
@@ -36,12 +37,140 @@ namespace RevitVersionControl.UI
 
         // ===== Public API used by the dockable-pane provider =====
 
-        public async void ReloadProjects()
+         public async void ReloadProjects()
         {
             if (_apiClient.IsLoggedIn)
                 await LoadProjectsAsync();
             else
                 Clear(resetPickers: true);
+        }
+
+        /// <summary>
+        /// Trigger the full Compare pipeline for merge: fetch diff + snapshot, build visual diff view,
+        /// and populate the pane with proper element IDs (same as clicking Compare manually).
+        /// </summary>
+        public async void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName)
+        {
+            if (diffResult == null) { Clear(resetPickers: false); return; }
+
+            // Store the diff for Apply Selected Changes
+            _lastDiffResult = diffResult;
+
+            // Show a merge banner immediately
+            StatusBanner.Text = $"Merge mode: fetching visual diff from '{targetBranchName}'...";
+            StatusBanner.Visibility = Visibility.Visible;
+
+            try
+            {
+                // Fetch the base snapshot (needed for ghost building)
+                var (diff, baseSnapshot, error) = await DiffViewService.FetchDiffAsync(projectId, baseCommitId, targetCommitId);
+
+                if (!string.IsNullOrEmpty(error) || diff == null)
+                {
+                    StatusBanner.Text = $"Merge mode: Could not build visual diff. Use list below to apply changes.";
+                    // Fall back to populating rows from the diff result we already have
+                    PopulateRowsFromDiff(diffResult, targetBranchName);
+                    return;
+                }
+
+                // Use the fresh diff (it's the same data, but ensures consistency)
+                _lastDiffResult = diff;
+
+                int total = diff.Summary != null && diff.Summary.TryGetValue("total", out var t) ? t : (diff.Changes?.Count ?? 0);
+                if (total == 0)
+                {
+                    StatusBanner.Text = "No differences found.";
+                    return;
+                }
+
+                // Queue the visual diff build via the same ExternalEvent the Compare button uses
+                if (DiffViewerExternalEvent.Instance == null || DiffViewerExternalEvent.Event == null)
+                {
+                    StatusBanner.Text = "Merge mode: Diff viewer not registered. Restart Revit.";
+                    PopulateRowsFromDiff(diff, targetBranchName);
+                    return;
+                }
+
+                var sessionId = Guid.NewGuid();
+                DiffViewerExternalEvent.Instance.Queue(new DiffViewerRequest
+                {
+                    Operation = DiffViewerOperation.Build,
+                    BuildRequest = new DiffViewBuildRequest
+                    {
+                        ProjectId = projectId,
+                        BaseCommitId = baseCommitId,
+                        TargetCommitId = targetCommitId,
+                        Diff = diff,
+                        BaseSnapshot = baseSnapshot,
+                        SessionId = sessionId,
+                        OrderSwapped = false
+                    },
+                    OnBuildComplete = result =>
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (result != null && result.Success)
+                            {
+                                // The LoadResult call populates rows with proper LiveElementId/GhostElementId
+                                LoadResult(result);
+                                // Override the banner to show merge mode
+                                StatusBanner.Text = $"Merge mode: Select changes to apply from '{targetBranchName}'";
+                                StatusBanner.Visibility = Visibility.Visible;
+                            }
+                            else
+                            {
+                                StatusBanner.Text = $"Merge mode: Visual diff failed. {result?.Message ?? ""}";
+                                PopulateRowsFromDiff(diff, targetBranchName);
+                            }
+                        });
+                    }
+                });
+                DiffViewerExternalEvent.Event.Raise();
+            }
+            catch (Exception ex)
+            {
+                StatusBanner.Text = $"Merge mode: Error fetching diff - {ex.Message}";
+                PopulateRowsFromDiff(diffResult, targetBranchName);
+            }
+        }
+
+        /// <summary>
+        /// Fallback: populate rows from diff data without visual ghost elements.
+        /// </summary>
+        private void PopulateRowsFromDiff(DiffResult diffResult, string branchName)
+        {
+            _allRows.Clear();
+            int addedCount = 0, modifiedCount = 0, deletedCount = 0;
+
+            foreach (var change in diffResult.Changes ?? new List<Change>())
+            {
+                string ct = change.ChangeType ?? "";
+                if (ct == "added") addedCount++;
+                else if (ct == "modified") modifiedCount++;
+                else if (ct == "deleted") deletedCount++;
+
+                string repoGuid = change.RepoGuid ?? "";
+                string shortRepo = string.IsNullOrEmpty(repoGuid) ? "-" : (repoGuid.Length > 8 ? repoGuid.Substring(0, 8) : repoGuid);
+
+                _allRows.Add(new DiffRow
+                {
+                    ChangeType = ct,
+                    Category = change.Category ?? "",
+                    TypeName = change.Type ?? "",
+                    RepoGuid = repoGuid,
+                    ShortRepoGuid = shortRepo,
+                    Note = $"Merge from {branchName}",
+                    IsSelected = true
+                });
+            }
+
+            AddedCountText.Text = $"{addedCount} added";
+            ModifiedCountText.Text = $"{modifiedCount} modified";
+            DeletedCountText.Text = $"{deletedCount} deleted";
+            ActiveDiffText.Visibility = Visibility.Visible;
+
+            ApplyFilter();
+            UpdateSelectionCount();
         }
 
         public void Clear() => Clear(resetPickers: false);
@@ -125,6 +254,7 @@ namespace RevitVersionControl.UI
             }
 
             ApplyFilter();
+            UpdateSelectionCount();
         }
 
         // ===== Picker / data flow =====
@@ -190,11 +320,13 @@ namespace RevitVersionControl.UI
                 BranchComboBox.IsEnabled = false;
 
                 var branches = await _apiClient.GetBranchesAsync(projectId);
-                BranchComboBox.ItemsSource = branches;
+                var allBranches = new List<Branch> { new Branch { Name = "All Branches" } };
+                if (branches != null) allBranches.AddRange(branches);
+                BranchComboBox.ItemsSource = allBranches;
 
                 _suppressBranchChanged = false;
 
-                if (branches == null || branches.Count == 0)
+                if (allBranches.Count == 0)
                 {
                     BaseCommitComboBox.ItemsSource = null;
                     TargetCommitComboBox.ItemsSource = null;
@@ -204,9 +336,9 @@ namespace RevitVersionControl.UI
 
                 Branch toSelect = null;
                 if (!string.IsNullOrEmpty(_autoSelectBranchName))
-                    toSelect = branches.FirstOrDefault(b => string.Equals(b.Name, _autoSelectBranchName, StringComparison.OrdinalIgnoreCase));
+                    toSelect = allBranches.FirstOrDefault(b => string.Equals(b.Name, _autoSelectBranchName, StringComparison.OrdinalIgnoreCase));
 
-                BranchComboBox.SelectedItem = toSelect ?? branches[0];
+                BranchComboBox.SelectedItem = toSelect ?? allBranches[0];
             }
             catch (Exception ex)
             {
@@ -256,9 +388,15 @@ namespace RevitVersionControl.UI
                     .ToList();
 
                 // Filter to the selected branch's chain — same logic HistoryPane uses.
-                var filteredCommits = new List<Commit>();
-                if (!string.IsNullOrEmpty(branch.HeadCommitId))
+                // If "All Branches" is selected, show all commits.
+                List<Commit> filteredCommits;
+                if (branch.Name == "All Branches")
                 {
+                    filteredCommits = commits;
+                }
+                else if (!string.IsNullOrEmpty(branch.HeadCommitId))
+                {
+                    filteredCommits = new List<Commit>();
                     var commitMap = commits.ToDictionary(c => c.CommitId, StringComparer.OrdinalIgnoreCase);
                     string currentId = branch.HeadCommitId;
                     while (!string.IsNullOrEmpty(currentId) && commitMap.TryGetValue(currentId, out Commit currentCommit))
@@ -266,15 +404,14 @@ namespace RevitVersionControl.UI
                         filteredCommits.Add(currentCommit);
                         currentId = currentCommit.ParentCommit;
                     }
+                    // The root may not link via parent chain on every project, so include it as a tail option too.
+                    if (rootCommit != null && filteredCommits.TrueForAll(c => c.CommitId != rootCommit.CommitId))
+                        filteredCommits.Add(rootCommit);
                 }
                 else
                 {
                     filteredCommits = commits.Where(c => string.Equals(c.BranchName, branch.Name, StringComparison.OrdinalIgnoreCase)).ToList();
                 }
-
-                // The root may not link via parent chain on every project, so include it as a tail option too.
-                if (rootCommit != null && filteredCommits.TrueForAll(c => c.CommitId != rootCommit.CommitId))
-                    filteredCommits.Add(rootCommit);
 
                 var items = filteredCommits.Select(c => new CommitDropdownItem
                 {
@@ -392,8 +529,11 @@ namespace RevitVersionControl.UI
                 {
                     MessageBox.Show("No differences between these commits.", "Diff Viewer",
                         MessageBoxButton.OK, MessageBoxImage.Information);
+                    _lastDiffResult = null;
                     return;
                 }
+
+                _lastDiffResult = diff;
 
                 if (total > DiffViewService.MaxChangesWarn && total <= DiffViewService.MaxChangesHardCap)
                 {
@@ -464,6 +604,7 @@ namespace RevitVersionControl.UI
                 (r.ChangeType == "deleted" && showDeleted)).ToList();
 
             RowsListView.ItemsSource = filtered;
+            UpdateSelectionCount();
         }
 
         private void Filter_Click(object sender, RoutedEventArgs e) => ApplyFilter();
@@ -519,6 +660,102 @@ namespace RevitVersionControl.UI
             DiffViewerExternalEvent.Event.Raise();
         }
 
+        // ===== Selection / Apply =====
+
+        private void RowCheckBox_Click(object sender, RoutedEventArgs e) => UpdateSelectionCount();
+
+        private void SelectAll_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var row in _allRows) row.IsSelected = true;
+            ApplyFilter();
+        }
+
+        private void DeselectAll_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var row in _allRows) row.IsSelected = false;
+            ApplyFilter();
+        }
+
+        private void UpdateSelectionCount()
+        {
+            int count = _allRows.Count(r => r.IsSelected);
+            SelectionCountText.Text = $"{count} selected";
+            ApplySelectedButton.IsEnabled = count > 0 && _lastDiffResult != null;
+        }
+
+        private void ApplySelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (_lastDiffResult == null || _lastDiffResult.Changes == null)
+            {
+                MessageBox.Show("No diff data available to apply.", "Apply Changes",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var selectedRepoGuids = new HashSet<string>(
+                _allRows.Where(r => r.IsSelected && !string.IsNullOrEmpty(r.RepoGuid))
+                        .Select(r => r.RepoGuid), StringComparer.OrdinalIgnoreCase);
+
+            var selectedChanges = _lastDiffResult.Changes
+                .Where(c => selectedRepoGuids.Contains(c.RepoGuid ?? ""))
+                .ToList();
+
+            if (selectedChanges.Count == 0)
+            {
+                MessageBox.Show("No matching changes found for the selected rows.", "Apply Changes",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            int addCount = selectedChanges.Count(c => c.ChangeType == "added");
+            int modCount = selectedChanges.Count(c => c.ChangeType == "modified");
+            int delCount = selectedChanges.Count(c => c.ChangeType == "deleted");
+
+            var confirm = MessageBox.Show(
+                $"Apply {selectedChanges.Count} selected change(s)?\n\n" +
+                $"  • Added: {addCount}\n" +
+                $"  • Modified: {modCount}\n" +
+                $"  • Deleted: {delCount}\n\n" +
+                "This will modify your active Revit model.",
+                "Confirm Apply",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            if (DiffViewerExternalEvent.Instance == null || DiffViewerExternalEvent.Event == null)
+            {
+                MessageBox.Show("Event handler not registered. Restart Revit.", "Apply Changes",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            string projectId = (ProjectComboBox.SelectedItem as Project)?.ProjectId;
+
+            DiffViewerExternalEvent.Instance.Queue(new DiffViewerRequest
+            {
+                Operation = DiffViewerOperation.ApplySelected,
+                ApplyChanges = selectedChanges,
+                ApplyProjectId = projectId,
+                OnApplyComplete = result =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (result != null && result.Success)
+                        {
+                            MessageBox.Show(result.Summary ?? "Changes applied successfully.",
+                                "Apply Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show(result?.Summary ?? "Failed to apply changes.",
+                                "Apply Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                        }
+                    });
+                }
+            });
+            DiffViewerExternalEvent.Event.Raise();
+        }
+
         // ===== Models =====
 
         public class CommitDropdownItem
@@ -538,6 +775,7 @@ namespace RevitVersionControl.UI
             public string Note { get; set; }
             public long LiveElementIdValue { get; set; }
             public long GhostElementIdValue { get; set; }
+            public bool IsSelected { get; set; } = true;
 
             public string ShortType => ChangeType switch
             {

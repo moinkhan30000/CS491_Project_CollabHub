@@ -424,6 +424,11 @@ namespace RevitVersionControl.Services
             return await PostAsync<Merge3WayResult>($"/projects/{projectId}/merge3way", payload);
         }
 
+        public async Task<HistoricalMergeResult> GetHistoricalMergeDecisionsAsync(string projectId, string commitId)
+        {
+            return await GetAsync<HistoricalMergeResult>($"/projects/{projectId}/commits/{commitId}/merge_decisions");
+        }
+
         // ========== Generic HTTP Methods ==========
 
         private async Task<T> GetAsync<T>(string endpoint)
@@ -822,6 +827,48 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("hasConflicts")]
         public bool HasConflicts { get; set; }
+
+        [JsonProperty("autoMergedChanges")]
+        public List<Change> AutoMergedChanges { get; set; }
+
+        [JsonProperty("bothDeletedElements")]
+        public List<string> BothDeletedElements { get; set; }
+    }
+
+    public class ConflictResolution
+    {
+        [JsonProperty("elementId")]
+        public string ElementId { get; set; }
+
+        [JsonProperty("resolution")]
+        public string ResolutionType { get; set; }
+    }
+
+    public class HistoricalMergeResult
+    {
+        [JsonProperty("commitId")]
+        public string CommitId { get; set; }
+
+        [JsonProperty("parentCommitId")]
+        public string ParentCommitId { get; set; }
+
+        [JsonProperty("parentCommitId2")]
+        public string ParentCommitId2 { get; set; }
+
+        [JsonProperty("commonAncestorId")]
+        public string CommonAncestorId { get; set; }
+
+        [JsonProperty("conflicts")]
+        public List<Conflict> Conflicts { get; set; }
+
+        [JsonProperty("autoMergedChanges")]
+        public List<Change> AutoMergedChanges { get; set; }
+
+        [JsonProperty("bothDeletedElements")]
+        public List<string> BothDeletedElements { get; set; }
+
+        [JsonProperty("resolutions")]
+        public List<ConflictResolution> Resolutions { get; set; }
     }
 
     public class Invite

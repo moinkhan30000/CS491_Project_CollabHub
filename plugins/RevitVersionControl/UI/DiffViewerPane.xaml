@@ -98,6 +98,14 @@
         <ListView Grid.Row="3" x:Name="RowsListView" BorderThickness="0">
             <ListView.View>
                 <GridView>
+                    <GridViewColumn Header="" Width="35">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center"
+                                          Click="RowCheckBox_Click"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
                     <GridViewColumn Header="" Width="50">
                         <GridViewColumn.CellTemplate>
                             <DataTemplate>
@@ -126,14 +134,28 @@
 
         <!-- Footer -->
         <Border Grid.Row="4" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CleanOrphansButton" Content="Clean Orphans" Width="120" Height="28"
-                        Margin="0,0,8,0" Click="CleanOrphans_Click"
-                        ToolTip="Remove every diff view and ghost from the document."/>
-                <Button x:Name="ClearDiffButton" Content="Clear Diff View" Width="130" Height="28"
-                        Background="#D50000" Foreground="White" FontWeight="Bold"
-                        Click="ClearDiff_Click"/>
-            </StackPanel>
+            <DockPanel LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button x:Name="SelectAllButton" Content="Select All" Width="90" Height="28"
+                            Margin="0,0,5,0" Click="SelectAll_Click"/>
+                    <Button x:Name="DeselectAllButton" Content="Deselect All" Width="90" Height="28"
+                            Margin="0,0,8,0" Click="DeselectAll_Click"/>
+                    <TextBlock x:Name="SelectionCountText" Text="0 selected" VerticalAlignment="Center"
+                               Foreground="#555" Margin="5,0,0,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button x:Name="ApplySelectedButton" Content="Apply Selected Changes" Width="170" Height="28"
+                            Margin="0,0,8,0" Background="#28A745" Foreground="White" FontWeight="Bold"
+                            Click="ApplySelected_Click" IsEnabled="False"
+                            ToolTip="Apply only the checked changes to your model."/>
+                    <Button x:Name="CleanOrphansButton" Content="Clean Orphans" Width="120" Height="28"
+                            Margin="0,0,8,0" Click="CleanOrphans_Click"
+                            ToolTip="Remove every diff view and ghost from the document."/>
+                    <Button x:Name="ClearDiffButton" Content="Clear Diff View" Width="130" Height="28"
+                            Background="#D50000" Foreground="White" FontWeight="Bold"
+                            Click="ClearDiff_Click"/>
+                </StackPanel>
+            </DockPanel>
         </Border>
     </Grid>
 </Page>

@@ -68,9 +68,51 @@ namespace RevitVersionControl.UI
 
                 if (pullResult.RequiresResolution)
                 {
+                    // Auto-open the Diff Viewer so user can see conflicts and choose changes
+                    try
+                    {
+                        var paneId = new Autodesk.Revit.UI.DockablePaneId(DiffViewerPaneProvider.PaneGuid);
+                        var diffPane = app.GetDockablePane(paneId);
+                        if (diffPane != null)
+                        {
+                            // Trigger a diff build between current and target commits
+                            if (DiffViewerExternalEvent.Instance != null && DiffViewerExternalEvent.Event != null)
+                            {
+                                var (diff, baseSnapshot, error) = System.Threading.Tasks.Task.Run(async () =>
+                                    await Services.DiffViewService.FetchDiffAsync(projectId, currentCommit, targetCommit))
+                                    .GetAwaiter().GetResult();
+
+                                if (diff != null && string.IsNullOrEmpty(error))
+                                {
+                                    var sessionId = Guid.NewGuid();
+                                    DiffViewerExternalEvent.Instance.Queue(new DiffViewerRequest
+                                    {
+                                        Operation = DiffViewerOperation.Build,
+                                        BuildRequest = new Services.DiffViewBuildRequest
+                                        {
+                                            ProjectId = projectId,
+                                            BaseCommitId = currentCommit,
+                                            TargetCommitId = targetCommit,
+                                            Diff = diff,
+                                            BaseSnapshot = baseSnapshot,
+                                            SessionId = sessionId,
+                                            OrderSwapped = false
+                                        },
+                                        OnBuildComplete = result => { }
+                                    });
+                                    DiffViewerExternalEvent.Event.Raise();
+                                }
+                            }
+
+                            diffPane.Show();
+                        }
+                    }
+                    catch { }
+
                     TaskDialog.Show("Conflicts",
-                        $"There are {pullResult.Conflicts.Count} conflicts that need resolution.\n" +
-                        "Please use the Pull menu or Merge dialog to resolve conflicts manually.");
+                        $"There are {pullResult.Conflicts.Count} conflicts that need resolution.\n\n" +
+                        "The Diff Viewer has been opened. Use the checkboxes to select which changes to apply, " +
+                        "then click 'Apply Selected Changes'.");
                     return;
                 }
                 
@@ -84,79 +126,19 @@ namespace RevitVersionControl.UI
                     return;
                 }
 
-                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
-                ElementApplier.ApplyResult applyResponse = null;
-                try
+                bool success = PullService.ExecutePullApply(
+                    app,
+                    projectId,
+                    trackedModelId,
+                    targetCommit,
+                    targetBranchName,
+                    pullResult,
+                    silentMode: false);
+
+                if (success)
                 {
-                    if (!PayloadSupportService.EnsurePayloadsAvailable(projectId, pullResult.Changes, out string payloadError))
-                    {
-                        TaskDialog.Show("Error", payloadError);
-                        return;
-                    }
-
-                    var applier = new ElementApplier(doc, projectId);
-                    applyResponse = applier.ApplyChanges(pullResult.Changes);
-                }
-                finally
-                {
-                    System.Windows.Input.Mouse.OverrideCursor = null;
-                }
-
-                if (applyResponse.Success)
-                {
-                    DocumentSyncStateService.SaveState(doc.PathName, projectId, trackedModelId, targetCommit, targetBranchName);
-                    
-                    try
-                    {
-                        var extractor = new ElementExtractor(doc);
-                        var extractionOptions = new ExtractionOptions
-                        {
-                            BatchSize = 200,
-                            PauseMilliseconds = 10,
-                            IncludeGeometry = true,
-                            LogProgress = true
-                        };
-                        var currentElements = extractor.ExtractAllElements(extractionOptions);
-                        var cachedSnapshot = new ElementSnapshot
-                        {
-                            Version = "1.0",
-                            ProjectId = projectId,
-                            ModelId = trackedModelId,
-                            Timestamp = DateTime.UtcNow,
-                            UserName = app.Application.Username,
-                            CommitMessage = $"Cached after pull to {targetCommit}",
-                            Elements = currentElements.Cast<object>().ToList(),
-                            ParentCommit = targetCommit
-                        };
-                        SnapshotCacheService.SaveSnapshot(projectId, trackedModelId, targetCommit, cachedSnapshot);
-                    }
-                    catch { }
-
-                    bool hasIssues = applyResponse.Errors.Count > 0
-                                     || applyResponse.Warnings.Count > 0
-                                     || applyResponse.UnsupportedElements.Count > 0
-                                     || applyResponse.IgnoredAutogenerated.Count > 0;
-
-                    string title = hasIssues ? "Completed with issues" : "Success";
-                    TaskDialog.Show(title, ApplyResultMessageBuilder.Build(applyResponse));
-
                     // Refresh HistoryPane
                     HistoryPaneProvider.Instance?.Refresh();
-                }
-                else
-                {
-                    string errorMessage = "Failed to apply changes:\n\n";
-                    if (applyResponse.Errors.Count > 0)
-                    {
-                        errorMessage += string.Join("\n", applyResponse.Errors.Take(5));
-                        if (applyResponse.Errors.Count > 5)
-                            errorMessage += $"\n\n... and {applyResponse.Errors.Count - 5} more errors";
-                    }
-                    else
-                    {
-                        errorMessage += "Unknown error occurred.";
-                    }
-                    TaskDialog.Show("Error", errorMessage);
                 }
             }
             catch (Exception ex)

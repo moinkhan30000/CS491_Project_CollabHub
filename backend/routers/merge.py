@@ -1,4 +1,4 @@
-﻿"""
+"""
 Merge Router
 """
 
@@ -9,17 +9,20 @@ from schemas.diff_schema import (
     MergeRequest, MergeResult,
     PullRequest, PullResult,
     Merge3WayRequest, Merge3WayResult,
+    HistoricalMergeResult
 )
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine
 from services.merge_resolution_applier import MergeResolutionApplier
+from services.historical_decision_service import HistoricalDecisionService
 
 router = APIRouter()
 diff_engine = DiffEngine()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
 resolution_applier = MergeResolutionApplier()
+historical_service = HistoricalDecisionService()
 
 
 @router.post("/{project_id}/merge", response_model=MergeResult)
@@ -202,4 +205,77 @@ async def merge_3way(
         hasConflicts=len(all_conflicts) > 0,
         autoMergedChanges=auto_merged,          # safe, no user action needed
         bothDeletedElements=both_deleted,        # informational, agreed deletes
+    )
+
+
+@router.get("/{project_id}/commits/{commit_id}/merge_decisions", response_model=HistoricalMergeResult)
+async def get_merge_decisions(
+    project_id: str,
+    commit_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Dynamically reconstruct past merge decisions for a given merge commit."""
+    project = project_repo.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    commit = commit_repo.get_commit(commit_id)
+    if not commit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commit not found")
+
+    if not commit.parentCommit2:
+        # Not a merge commit, return empty
+        return HistoricalMergeResult(
+            commitId=commit.commitId,
+            parentCommitId=commit.parentCommit or "",
+            parentCommitId2="",
+        )
+
+    common_ancestor = commit_repo.find_common_ancestor(commit.parentCommit, commit.parentCommit2)
+    
+    base_snapshot = commit_repo.get_snapshot(common_ancestor) if common_ancestor else None
+    if not base_snapshot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Common ancestor snapshot not found")
+
+    source_snapshot = commit_repo.get_snapshot(commit.parentCommit)
+    target_snapshot = commit_repo.get_snapshot(commit.parentCommit2)
+    final_snapshot = commit_repo.get_snapshot(commit.commitId)
+
+    if not source_snapshot or not target_snapshot or not final_snapshot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent or final snapshots not found")
+
+    source_diff = diff_engine.compute_diff(
+        base_elements=base_snapshot.elements,
+        target_elements=source_snapshot.elements,
+        base_version=common_ancestor,
+        target_version=commit.parentCommit,
+    )
+    target_diff = diff_engine.compute_diff(
+        base_elements=base_snapshot.elements,
+        target_elements=target_snapshot.elements,
+        base_version=common_ancestor,
+        target_version=commit.parentCommit2,
+    )
+
+    mod_conflicts, auto_merged, both_deleted = diff_engine.detect_conflicts_with_auto_merged(
+        local_changes=source_diff.changes,
+        remote_changes=target_diff.changes,
+    )
+    spatial_conflicts = diff_engine.detect_spatial_collisions(
+        source_changes=source_diff.changes,
+        target_changes=target_diff.changes,
+    )
+    all_conflicts = mod_conflicts + spatial_conflicts
+
+    resolutions = historical_service.reconstruct_decisions(all_conflicts, final_snapshot)
+
+    return HistoricalMergeResult(
+        commitId=commit.commitId,
+        parentCommitId=commit.parentCommit,
+        parentCommitId2=commit.parentCommit2,
+        commonAncestorId=common_ancestor,
+        conflicts=all_conflicts,
+        autoMergedChanges=auto_merged,
+        bothDeletedElements=both_deleted,
+        resolutions=resolutions
     )

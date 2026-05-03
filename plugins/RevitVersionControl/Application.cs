@@ -224,6 +224,8 @@ namespace RevitVersionControl
         public void Show(Services.DiffViewBuildResult result) => _pane?.LoadResult(result);
         public void ReloadProjects() => _pane?.ReloadProjects();
         public void Clear() => _pane?.Clear(resetPickers: true);
+        public void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName) =>
+            _pane?.LoadDiffForMerge(diffResult, projectId, baseCommitId, targetCommitId, targetBranchName);
     }
 
     public class DiffMergePaneProvider : IDockablePaneProvider
@@ -254,6 +256,14 @@ namespace RevitVersionControl
 
         public void LoadMerge3WayResult(Merge3WayResult result, string projectId, string sourceCommitId, string targetCommitId, string modelId) =>
             _diffMergePane?.LoadMerge3WayResult(result, projectId, sourceCommitId, targetCommitId, modelId);
+
+        public void LoadHistoricalMergeResult(HistoricalMergeResult result, string projectId, string commitId) =>
+            _diffMergePane?.LoadHistoricalMergeResult(result, projectId, commitId);
+
+        public void SetMode(DiffMergeMode mode) => _diffMergePane?.SetMode(mode);
+
+        public void AutoFinalizeCleanMerge(Merge3WayResult result, string projectId, string targetCommitId, string modelId) =>
+            _diffMergePane?.AutoFinalizeCleanMerge(result, projectId, targetCommitId, modelId);
 
         public void Clear() => _diffMergePane?.Clear();
     }

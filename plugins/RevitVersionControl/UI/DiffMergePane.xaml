@@ -187,7 +187,7 @@ Title="Changes &amp; Merge">
                 <StackPanel x:Name="PreviewActionPanel" Orientation="Horizontal" HorizontalAlignment="Right" Visibility="Collapsed">
                     <Button Content="Cancel Preview" Width="120" Height="30" Margin="0,0,15,0"
                             Background="#DC3545" Foreground="White" Click="CancelPreview_Click"/>
-                    <Button Content="Finalize Merge" Width="130" Height="30"
+                    <Button x:Name="FinalizeMergeButton" Content="Finalize Merge" Width="130" Height="30"
                             Background="#28A745" Foreground="White" FontWeight="Bold" Click="FinalizeMerge_Click"/>
                 </StackPanel>
             </Grid>

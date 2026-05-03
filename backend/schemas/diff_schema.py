@@ -88,3 +88,15 @@ class Merge3WayResult(BaseModel):
     hasConflicts: bool = False
     autoMergedChanges: List[Change] = []    # safe to apply without user review
     bothDeletedElements: List[str] = []     # deleted on both branches — informational only
+
+# ---------- Historical Merge Decision Viewer ----------
+
+class HistoricalMergeResult(BaseModel):
+    commitId: str
+    parentCommitId: str
+    parentCommitId2: str
+    commonAncestorId: Optional[str] = None
+    conflicts: List[Conflict] = []
+    autoMergedChanges: List[Change] = []
+    bothDeletedElements: List[str] = []
+    resolutions: List[Resolution] = []

@@ -445,8 +445,8 @@ namespace RevitVersionControl.UI
                         var maxJ = bbox["max"] as Newtonsoft.Json.Linq.JObject;
                         if (minJ != null && maxJ != null)
                         {
-                            min = new XYZ(minJ["x"].Value<double>(), minJ["y"].Value<double>(), minJ["z"].Value<double>());
-                            max = new XYZ(maxJ["x"].Value<double>(), maxJ["y"].Value<double>(), maxJ["z"].Value<double>());
+                            min = new XYZ(minJ.Value<double>("x"), minJ.Value<double>("y"), minJ.Value<double>("z"));
+                            max = new XYZ(maxJ.Value<double>("x"), maxJ.Value<double>("y"), maxJ.Value<double>("z"));
                         }
                     }
                 }
