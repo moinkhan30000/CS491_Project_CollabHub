@@ -189,66 +189,149 @@ namespace RevitVersionControl.UI
             UpdateMergeButtonVisibility();
         }
 
-        private void SetPreviewMode(bool isPreviewing)
+        private void FilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            _isPreviewing = isPreviewing;
-            ListModeGrid.Visibility = isPreviewing ? Visibility.Collapsed : Visibility.Visible;
-            ListActionPanel.Visibility = isPreviewing ? Visibility.Collapsed : Visibility.Visible;
+            if (ChangesListView.ItemsSource == null) return;
             
-            PreviewModeGrid.Visibility = isPreviewing ? Visibility.Visible : Visibility.Collapsed;
-            PreviewNavPanel.Visibility = isPreviewing ? Visibility.Visible : Visibility.Collapsed;
-            PreviewActionPanel.Visibility = isPreviewing ? Visibility.Visible : Visibility.Collapsed;
+            var selectedItem = FilterComboBox.SelectedItem as ComboBoxItem;
+            if (selectedItem == null) return;
             
-            if (isPreviewing)
+            string filter = selectedItem.Content.ToString();
+            ApplyFilter(filter);
+        }
+
+        private void ApplyFilter(string filter)
+        {
+            if (_currentChanges == null) return;
+            
+            var filteredItems = BuildChangeItems(_currentChanges, _currentConflicts);
+            
+            switch (filter)
             {
-                _previewIndex = 0;
-                UpdatePreviewCard();
+                case "Conflicts Only":
+                    filteredItems = filteredItems.Where(item => item.IsConflict).ToList();
+                    break;
+                case "Spatial Collisions":
+                    filteredItems = filteredItems.Where(item => 
+                        _currentConflicts.Any(c => 
+                            (c.ElementId == item.ElementId || c.ElementId == item.RepoGuid) && 
+                            c.ConflictType == "spatial_collision")).ToList();
+                    break;
+                case "Parameter Conflicts":
+                    filteredItems = filteredItems.Where(item => 
+                        _currentConflicts.Any(c => 
+                            (c.ElementId == item.ElementId || c.ElementId == item.RepoGuid) && 
+                            c.ConflictType == "parameter_conflict")).ToList();
+                    break;
+                case "Unresolved Only":
+                    filteredItems = filteredItems.Where(item => 
+                        _currentConflicts.Any(c => 
+                            (c.ElementId == item.ElementId || c.ElementId == item.RepoGuid) && 
+                            !PreviewStateService.ConflictResolutions.ContainsKey(c.ElementId ?? c.ElementId))).ToList();
+                    break;
+                case "All Changes":
+                default:
+                    // No filtering
+                    break;
+            }
+            
+            ChangesListView.ItemsSource = filteredItems;
+        }
+
+        private void BatchActionsMenu_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button?.ContextMenu != null)
+            {
+                button.ContextMenu.IsOpen = true;
             }
         }
 
-        private void StartVisualMerge_Click(object sender, RoutedEventArgs e)
+        private void BatchResolveSpatialKeepBoth_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentChanges == null || _currentChanges.Count == 0)
+            foreach (var conflict in _currentConflicts.Where(c => c.ConflictType == "spatial_collision"))
             {
-                MessageBox.Show("No changes to preview.", "Visual Merge", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                PreviewStateService.ConflictResolutions[conflict.ElementId] = "keep_both";
             }
+            RefreshChangeItems();
+            MessageBox.Show("All spatial collisions resolved to 'Keep Both'.", "Batch Resolution", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
-            if (!_isMergeMode)
+        private void BatchAcceptRemote_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var conflict in _currentConflicts)
             {
-                MessageBox.Show("Visual merge is only available when merging branches.", "Visual Merge", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                PreviewStateService.ConflictResolutions[conflict.ElementId] = "accept_remote";
             }
+            RefreshChangeItems();
+            MessageBox.Show("All conflicts resolved to 'Accept Remote'.", "Batch Resolution", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
-            try
+        private void BatchRejectDeletions_Click(object sender, RoutedEventArgs e)
+        {
+            var deletionConflicts = _currentConflicts.Where(c => 
+                c.ConflictType == "delete_modified" && 
+                ((c.LocalChange?.ContainsKey("ChangeType") == true && c.LocalChange["ChangeType"]?.ToString() == "deleted") || 
+                 (c.RemoteChange?.ContainsKey("ChangeType") == true && c.RemoteChange["ChangeType"]?.ToString() == "deleted"))).ToList();
+            
+            foreach (var conflict in deletionConflicts)
             {
-                _previewHandler.Queue(new DiffMergeApplyRequest
+                PreviewStateService.ConflictResolutions[conflict.ElementId] = "keep_local";
+            }
+            RefreshChangeItems();
+            MessageBox.Show("All deletion conflicts resolved to 'Keep Local'.", "Batch Resolution", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void BatchSelectConflicts_Click(object sender, RoutedEventArgs e)
+        {
+            var changeItems = ChangesListView.ItemsSource as List<ChangeItem>;
+            if (changeItems == null) return;
+            
+            foreach (var item in changeItems.Where(item => item.IsConflict))
+            {
+                item.IsSelected = true;
+            }
+            ChangesListView.Items.Refresh();
+        }
+
+        private void RefreshChangeItems()
+        {
+            ChangesListView.ItemsSource = BuildChangeItems(_currentChanges, _currentConflicts);
+            ApplyFilter((FilterComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "All Changes");
+        }
+
+        private void HighlightCollision_Click(object sender, RoutedEventArgs e)
+        {
+            if (_previewIndex < 0 || _previewIndex >= _currentChanges.Count) return;
+            
+            var currentChange = _currentChanges[_previewIndex];
+            var conflict = _currentConflicts.FirstOrDefault(c => 
+                c.ElementId == currentChange.ElementId || c.ElementId == currentChange.RepoGuid);
+            
+            if (conflict != null && conflict.ConflictType == "spatial_collision")
+            {
+                try
                 {
-                    ProjectId = _currentProjectId,
-                    TargetCommitId = _currentTargetCommitId,
-                    ModelId = _currentModelId,
-                    Changes = _currentChanges
-                });
-                _previewExternalEvent.Raise();
-                SetPreviewMode(true);
+                    _updateHandler.Queue(new DiffMergeUpdateRequest
+                    {
+                        AllChanges = _currentChanges,
+                        CurrentIndex = _previewIndex,
+                        IncludedStates = GetIncludedStates(),
+                        ConflictResolutions = PreviewStateService.ConflictResolutions,
+                        HighlightCollision = true,
+                        ZoomToElement = true,
+                        CurrentChange = _currentChanges[_previewIndex]
+                    });
+                    _updateExternalEvent.Raise();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to highlight collision: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
-            catch (Exception ex)
+            else
             {
-                MessageBox.Show($"Failed to start visual merge: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void CancelPreview_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                _finalizeHandler.Queue(new DiffMergeFinalizeRequest { IsCancelled = true });
-                _finalizeExternalEvent.Raise();
-                SetPreviewMode(false);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to cancel preview: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("No spatial collision to highlight for this change.", "Highlight Collision", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
 
@@ -630,6 +713,43 @@ namespace RevitVersionControl.UI
             return string.Join(" | ", details);
         }
 
+        private void SetPreviewMode(bool isPreview)
+        {
+            if (isPreview)
+            {
+                PreviewActionPanel.Visibility = Visibility.Visible;
+                ListActionPanel.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                PreviewActionPanel.Visibility = Visibility.Collapsed;
+                ListActionPanel.Visibility = Visibility.Visible;
+            }
+        }
+
+        private List<bool> GetIncludedStates()
+        {
+            return ChangesListView.ItemsSource?.Cast<ChangeItem>()
+                .Select(item => item.IsSelected)
+                .ToList() ?? new List<bool>();
+        }
+
+        private void StartVisualMerge_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentChanges == null || _currentChanges.Count == 0) return;
+
+            _previewIndex = 0;
+            SetPreviewMode(true);
+            UpdatePreviewCard();
+        }
+
+        private void CancelPreview_Click(object sender, RoutedEventArgs e)
+        {
+            SetPreviewMode(false);
+            _previewIndex = -1;
+            Clear();
+        }
+
         public class ChangeItem : INotifyPropertyChanged
         {
             private bool _isSelected;
@@ -640,6 +760,7 @@ namespace RevitVersionControl.UI
             public string Description { get; set; }
             public string Details { get; set; }
             public string ElementId { get; set; }
+            public string RepoGuid { get; set; }
 
             // Conflict fields
             public bool IsConflict { get; set; }

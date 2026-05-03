@@ -34,16 +34,32 @@ Title="Changes &amp; Merge">
 
             <!-- Summary -->
             <Border Grid.Row="0" Background="#F0F0F0" Padding="10" BorderThickness="0,0,0,1" BorderBrush="#CCC">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Added: " FontWeight="Bold"/>
-                    <TextBlock x:Name="AddedCountText" Text="0" Foreground="Green" Margin="0,0,15,0"/>
-                    <TextBlock Text="Modified: " FontWeight="Bold"/>
-                    <TextBlock x:Name="ModifiedCountText" Text="0" Foreground="Orange" Margin="0,0,15,0"/>
-                    <TextBlock Text="Deleted: " FontWeight="Bold"/>
-                    <TextBlock x:Name="DeletedCountText" Text="0" Foreground="Red" Margin="0,0,15,0"/>
-                    <TextBlock Text="Conflicts: " FontWeight="Bold"/>
-                    <TextBlock x:Name="ConflictCountText" Text="0" Foreground="Magenta"/>
-                </StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Grid.Column="0">
+                        <TextBlock Text="Added: " FontWeight="Bold"/>
+                        <TextBlock x:Name="AddedCountText" Text="0" Foreground="Green" Margin="0,0,15,0"/>
+                        <TextBlock Text="Modified: " FontWeight="Bold"/>
+                        <TextBlock x:Name="ModifiedCountText" Text="0" Foreground="Orange" Margin="0,0,15,0"/>
+                        <TextBlock Text="Deleted: " FontWeight="Bold"/>
+                        <TextBlock x:Name="DeletedCountText" Text="0" Foreground="Red" Margin="0,0,15,0"/>
+                        <TextBlock Text="Conflicts: " FontWeight="Bold"/>
+                        <TextBlock x:Name="ConflictCountText" Text="0" Foreground="Magenta"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Grid.Column="1">
+                        <TextBlock Text="Filter: " VerticalAlignment="Center" Margin="10,0,5,0"/>
+                        <ComboBox x:Name="FilterComboBox" Width="120" SelectionChanged="FilterComboBox_SelectionChanged">
+                            <ComboBoxItem Content="All Changes" IsSelected="True"/>
+                            <ComboBoxItem Content="Conflicts Only"/>
+                            <ComboBoxItem Content="Spatial Collisions"/>
+                            <ComboBoxItem Content="Parameter Conflicts"/>
+                            <ComboBoxItem Content="Unresolved Only"/>
+                        </ComboBox>
+                    </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Conflict Banner -->
@@ -143,6 +159,7 @@ Title="Changes &amp; Merge">
                     Visibility="Collapsed" Margin="5">
             <Button Content="◄ Previous" Width="90" Height="30" Margin="0,0,10,0" Click="PrevChange_Click"/>
             <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,10,0" Click="ZoomElement_Click"/>
+            <Button Content="Highlight Collision" Width="140" Height="30" Margin="0,0,10,0" Click="HighlightCollision_Click"/>
             <Button Content="Next ►" Width="90" Height="30" Click="NextChange_Click"/>
         </StackPanel>
 
@@ -150,6 +167,16 @@ Title="Changes &amp; Merge">
         <Border Grid.Row="3" Background="#F0F0F0" Padding="10" BorderThickness="0,1,0,0" BorderBrush="#CCC">
             <Grid>
                 <StackPanel x:Name="ListActionPanel" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Batch Actions" Width="100" Height="30" Margin="0,0,10,0" Click="BatchActionsMenu_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Resolve All Spatial → Keep Both" Click="BatchResolveSpatialKeepBoth_Click"/>
+                                <MenuItem Header="Accept All Remote Changes" Click="BatchAcceptRemote_Click"/>
+                                <MenuItem Header="Reject All Deletions" Click="BatchRejectDeletions_Click"/>
+                                <MenuItem Header="Select All Conflicts" Click="BatchSelectConflicts_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                     <Button Content="Zoom to Element" Width="120" Height="30" Margin="0,0,15,0"
                             Click="ZoomElement_Click"/>
                     <Button x:Name="StartMergeButton" Content="Start Visual Merge" Width="140" Height="30" Margin="0,0,15,0"

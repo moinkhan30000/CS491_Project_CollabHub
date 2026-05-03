@@ -12,6 +12,7 @@ namespace RevitVersionControl.UI
     /// - Highlighting the currently reviewed element
     /// - Toggling element visibility when Include is checked/unchecked
     /// - Updating conflict resolution visuals
+    /// - Highlighting spatial collisions
     /// </summary>
     internal class DiffMergeUpdateHandler : IExternalEventHandler
     {
@@ -48,6 +49,12 @@ namespace RevitVersionControl.UI
                 {
                     // Re-apply overrides for ALL tracked elements based on current state
                     RefreshAllOverrides(doc, previewView, solidFill, request);
+
+                    // Highlight spatial collisions if requested
+                    if (request.HighlightCollision)
+                    {
+                        HighlightSpatialCollisions(doc, previewView, request);
+                    }
 
                     // Zoom to current element if requested
                     if (request.ZoomToElement)
@@ -250,6 +257,89 @@ namespace RevitVersionControl.UI
                 ?? patterns.FirstOrDefault();
         }
 
+        private void HighlightSpatialCollisions(Document doc, View view, DiffMergeUpdateRequest request)
+        {
+            if (request.CurrentChange == null) return;
+
+            // Find conflicts for the current change
+            var currentConflicts = PreviewStateService.ActiveConflicts.Where(c =>
+                c.ElementId == request.CurrentChange.ElementId ||
+                c.ElementId == request.CurrentChange.RepoGuid).ToList();
+
+            var spatialConflicts = currentConflicts.Where(c => c.ConflictType == "spatial_collision").ToList();
+            if (!spatialConflicts.Any()) return;
+
+            // For spatial conflicts, highlight both colliding elements
+            foreach (var conflict in spatialConflicts)
+            {
+                // Parse the conflict.ElementId to get both element IDs
+                // Format: "elem1_id+elem2_id"
+                var parts = conflict.ElementId.Split('+');
+                if (parts.Length != 2) continue;
+
+                var elem1Id = parts[0];
+                var elem2Id = parts[1];
+
+                // Find the elements in the model
+                ElementId id1 = ResolveElementIdByString(doc, elem1Id);
+                ElementId id2 = ResolveElementIdByString(doc, elem2Id);
+
+                if (id1 != ElementId.InvalidElementId && id2 != ElementId.InvalidElementId)
+                {
+                    // Create collision highlight - semi-transparent red overlay
+                    Color collisionColor = new Color(255, 0, 0); // Red
+                    OverrideGraphicSettings collisionOgs = new OverrideGraphicSettings();
+                    collisionOgs.SetProjectionLineColor(collisionColor);
+                    collisionOgs.SetProjectionLineWeight(5);
+                    collisionOgs.SetSurfaceForegroundPatternColor(collisionColor);
+                    collisionOgs.SetSurfaceBackgroundPatternColor(collisionColor);
+                    collisionOgs.SetSurfaceTransparency(50); // Semi-transparent
+
+                    FillPatternElement solidFill = FindSolidFill(doc);
+                    if (solidFill != null)
+                    {
+                        collisionOgs.SetSurfaceForegroundPatternId(solidFill.Id);
+                        collisionOgs.SetSurfaceBackgroundPatternId(solidFill.Id);
+                    }
+
+                    try { view.SetElementOverrides(id1, collisionOgs); } catch { }
+                    try { view.SetElementOverrides(id2, collisionOgs); } catch { }
+                }
+            }
+        }
+
+        private static ElementId ResolveElementIdByString(Document doc, string elementId)
+        {
+            if (string.IsNullOrEmpty(elementId)) return ElementId.InvalidElementId;
+
+            // Check temp elements first
+            if (PreviewStateService.TempAddedElements.TryGetValue("id:" + elementId, out ElementId tempId))
+                return tempId;
+            if (PreviewStateService.TempGhostElements.TryGetValue("id:" + elementId, out tempId))
+                return tempId;
+
+            // Try UniqueId
+            try
+            {
+                Element el = doc.GetElement(elementId);
+                if (el != null) return el.Id;
+            }
+            catch { }
+
+            // Try numeric ID
+            if (long.TryParse(elementId, out long numId))
+            {
+                try
+                {
+                    Element el = doc.GetElement(new ElementId(numId));
+                    if (el != null) return el.Id;
+                }
+                catch { }
+            }
+
+            return ElementId.InvalidElementId;
+        }
+
         public string GetName() => "Diff Merge Update Handler";
     }
 
@@ -272,5 +362,8 @@ namespace RevitVersionControl.UI
 
         /// <summary>Whether to zoom to the current element.</summary>
         public bool ZoomToElement { get; set; }
+
+        /// <summary>Whether to highlight spatial collisions.</summary>
+        public bool HighlightCollision { get; set; }
     }
 }
