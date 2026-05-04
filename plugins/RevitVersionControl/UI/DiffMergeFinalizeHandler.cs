@@ -312,14 +312,26 @@ namespace RevitVersionControl.UI
                 case StorageType.ElementId:
                     if (!string.IsNullOrEmpty(elementName))
                     {
-                        var match = new FilteredElementCollector(doc)
+                        // Fast path: level lookup (case-insensitive) for height-constraint params
+                        var levelMatch = new FilteredElementCollector(doc)
+                            .OfClass(typeof(Level))
+                            .Cast<Level>()
+                            .FirstOrDefault(l =>
+                                string.Equals(l.Name, elementName, StringComparison.OrdinalIgnoreCase));
+                        if (levelMatch != null)
+                        {
+                            param.Set(levelMatch.Id);
+                            break;
+                        }
+
+                        var typeMatch = new FilteredElementCollector(doc)
                             .OfClass(typeof(ElementType))
                             .Cast<ElementType>()
                             .FirstOrDefault(t =>
                                 (t.FamilyName + " : " + t.Name) == elementName ||
                                 t.Name == elementName);
-                        if (match != null)
-                            param.Set(match.Id);
+                        if (typeMatch != null)
+                            param.Set(typeMatch.Id);
                     }
                     else if (int.TryParse(newValue.ToString(), out int eid))
                     {

@@ -2,6 +2,8 @@
 Merge Router
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, status, Depends
 from entities.user_entity import User
 from dependencies import get_current_user
@@ -11,6 +13,7 @@ from schemas.diff_schema import (
     Merge3WayRequest, Merge3WayResult,
     HistoricalMergeResult
 )
+from schemas.element_schema import ElementSnapshot
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
 from diff_engine import DiffEngine
@@ -87,15 +90,60 @@ async def merge_commits(
     )
     skipped = resolution_applier.count_skipped(all_conflicts, merge_request.resolutions)
 
-    # NOTE: merge commit persistence is not yet implemented.
-    # merged_changes contains the correct final changeset for when it is.
+    unresolved_conflicts = [
+        c for c in all_conflicts
+        if not any(r.elementId == c.elementId for r in merge_request.resolutions)
+    ]
+
+    # If there are still unresolved conflicts, return without persisting
+    if skipped > 0:
+        return MergeResult(
+            mergeCommitId="",
+            status="conflict",
+            appliedChanges=len(merged_changes),
+            skippedChanges=skipped,
+            conflicts=unresolved_conflicts,
+        )
+
+    # All conflicts resolved — reconstruct the merged snapshot and persist
+    merged_elements = diff_engine.apply_changes(
+        base_elements=base_snapshot.elements,
+        changes=merged_changes,
+    )
+
+    source_commit_meta = commit_repo.get_commit(merge_request.sourceCommit)
+
+    merged_snapshot = ElementSnapshot(
+        version=base_snapshot.version,
+        projectId=project_id,
+        modelId=base_snapshot.modelId,
+        timestamp=datetime.utcnow(),
+        userName=current_user.email,
+        commitMessage=merge_request.message,
+        elements=merged_elements,
+    )
+
+    new_commit = commit_repo.create_commit(
+        project_id=project_id,
+        model_id=base_snapshot.modelId,
+        message=merge_request.message,
+        author=current_user.email,
+        change_type="MOD",
+        parent_commit=merge_request.sourceCommit,
+        parent_commit2=merge_request.targetCommit,
+        snapshot=merged_snapshot,
+        diff=merged_changes,
+        element_count=len(merged_elements),
+        changed_elements=len(merged_changes),
+        branch_name=source_commit_meta.branchName if source_commit_meta else None,
+    )
+
     return MergeResult(
-        mergeCommitId="pending",        # placeholder until commit persistence is added
-        status="success" if skipped == 0 else "conflict",
+        mergeCommitId=new_commit.commitId,
+        status="success",
         appliedChanges=len(merged_changes),
-        skippedChanges=skipped,
-        conflicts=[c for c in all_conflicts
-                   if not any(r.elementId == c.elementId for r in merge_request.resolutions)],
+        skippedChanges=0,
+        conflicts=[],
     )
 
 
@@ -117,7 +165,11 @@ async def pull_changes(
 
     if chain_changes is not None:
         if pull_request.selectiveElements:
-            chain_changes = [c for c in chain_changes if c.elementId in pull_request.selectiveElements]
+            sel = set(pull_request.selectiveElements)
+            chain_changes = [
+                c for c in chain_changes
+                if c.elementId in sel or (c.repoGuid and c.repoGuid in sel)
+            ]
         return PullResult(changes=chain_changes, conflicts=[], requiresResolution=False)
 
     current_snapshot = commit_repo.get_snapshot(pull_request.currentCommit)
@@ -135,7 +187,11 @@ async def pull_changes(
 
     changes = diff_result.changes
     if pull_request.selectiveElements:
-        changes = [c for c in changes if c.elementId in pull_request.selectiveElements]
+        sel = set(pull_request.selectiveElements)
+        changes = [
+            c for c in changes
+            if c.elementId in sel or (c.repoGuid and c.repoGuid in sel)
+        ]
 
     return PullResult(
         changes=changes,

@@ -212,14 +212,38 @@ namespace RevitVersionControl.Services
 
             ActivateSymbol(symbol);
 
+            // Inclined/diagonal column: location type is "curve" with start and end points
+            if (string.Equals(location?["type"]?.ToString(), "curve", StringComparison.OrdinalIgnoreCase))
+            {
+                var startPt = location["startPoint"] as JObject;
+                var endPt   = location["endPoint"]   as JObject;
+                if (startPt == null || endPt == null)
+                    return CreationResult.Failed("Column: missing startPoint or endPoint for curve location");
+
+                var start = ReadXYZ(startPt);
+                var end   = ReadXYZ(endPt);
+
+                if (start.DistanceTo(end) < 0.01)
+                    return CreationResult.Failed("Column: start and end points are too close");
+
+                Level level = GetNearestLevel(start.Z);
+                if (level == null)
+                    return CreationResult.Failed("Column: no levels found in document");
+
+                var instance = _document.Create.NewFamilyInstance(
+                    Line.CreateBound(start, end), symbol, level, StructuralType.Column);
+                return CreationResult.Success(instance);
+            }
+
+            // Vertical column: location type is "point"
             XYZ point = ReadLocationPoint(location);
-            Level level = GetNearestLevel(point.Z);
-            if (level == null)
+            Level baseLevel = GetNearestLevel(point.Z);
+            if (baseLevel == null)
                 return CreationResult.Failed("Column: no levels found in document");
 
-            var instance = _document.Create.NewFamilyInstance(
-                point, symbol, level, StructuralType.Column);
-            return CreationResult.Success(instance);
+            var pointInstance = _document.Create.NewFamilyInstance(
+                point, symbol, baseLevel, StructuralType.Column);
+            return CreationResult.Success(pointInstance);
         }
 
         private CreationResult CreateBeam(string familyName, string typeName, JObject location)

@@ -500,6 +500,14 @@ namespace RevitVersionControl.Services
                 case StorageType.ElementId:
                     if (!string.IsNullOrEmpty(elementName))
                     {
+                        // Fast path: level lookup (case-insensitive) for height-constraint params
+                        ElementId levelId = ResolveLevelByName(elementName);
+                        if (levelId != null)
+                        {
+                            param.Set(levelId);
+                            return true;
+                        }
+
                         ElementId resolvedId = ResolveElementIdByName(elementName);
                         if (resolvedId != null)
                         {
@@ -521,6 +529,27 @@ namespace RevitVersionControl.Services
             }
 
             return false;
+        }
+
+        private ElementId ResolveLevelByName(string levelName)
+        {
+            if (string.IsNullOrWhiteSpace(levelName))
+                return null;
+
+            try
+            {
+                var level = new FilteredElementCollector(_document)
+                    .OfClass(typeof(Level))
+                    .Cast<Level>()
+                    .FirstOrDefault(l =>
+                        string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase));
+
+                return level?.Id;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private bool ApplyTypeChange(
