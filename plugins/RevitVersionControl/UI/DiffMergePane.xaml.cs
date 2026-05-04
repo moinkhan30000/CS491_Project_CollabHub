@@ -559,7 +559,7 @@ namespace RevitVersionControl.UI
         private void ZoomToSelectedListElement()
         {
             var item = ChangesListView.SelectedItem as ChangeItem;
-            if item == null)
+            if (item == null)
             {
                 MessageBox.Show("Please select a change to zoom to.", "Zoom", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
@@ -646,7 +646,7 @@ namespace RevitVersionControl.UI
             var includedStates = new List<bool>();
             for (int i = 0; i < _currentChanges.Count; i++)
             {
-                if i < items.Count)
+                if (i < items.Count)
                     includedStates.Add(items[i].IsSelected);
                 else
                     includedStates.Add(true);
@@ -667,28 +667,9 @@ namespace RevitVersionControl.UI
             _updateExternalEvent.Raise();
         }
 
-        private void SetMode(DiffMergeMode mode)
+        public void SetMode(DiffMergeMode mode)
         {
             CurrentMode = mode;
-            switch (mode)
-            {
-                case DiffMergeMode.Resolution:
-                    VisualDiffPanel.Visibility = Visibility.Visible;
-                    HistoryPanel.Visibility = Visibility.Collapsed;
-                    ConflictPanel.Visibility = Visibility.Collapsed;
-                    break;
-                case DiffMergeMode.ViewOnly:
-                    VisualDiffPanel.Visibility = Visibility.Visible;
-                    HistoryPanel.Visibility = Visibility.Collapsed;
-                    ConflictPanel.Visibility = Visibility.Collapsed;
-                    break;
-                case DiffMergeMode.HistoricalViewer:
-                    VisualDiffPanel.Visibility = Visibility.Collapsed;
-                    HistoryPanel.Visibility = Visibility.Visible;
-                    ConflictPanel.Visibility = Visibility.Visible;
-                    break;
-            }
-
             UpdateMergeButtonVisibility();
         }
 
@@ -697,33 +678,24 @@ namespace RevitVersionControl.UI
             _isPreviewing = isPreview;
             if (isPreview)
             {
-                // When entering preview mode, ensure all changes are considered included
-                var allIncluded = Enumerable.Repeat(true, _currentChanges.Count).ToList();
-                var allConflicts = new Dictionary<string, string>(PreviewStateService.ConflictResolutions);
-                
-                _updateHandler.Queue(new DiffMergeUpdateRequest
-                {
-                    AllChanges = _currentChanges,
-                    IncludedStates = allIncluded,
-                    ConflictResolutions = allConflicts,
-                    ZoomToElement = false,
-                    CurrentIndex = -1
-                });
+                PreviewActionPanel.Visibility = Visibility.Visible;
+                ListActionPanel.Visibility = Visibility.Collapsed;
+
+                bool isResolutionEnabled = CurrentMode == DiffMergeMode.Resolution;
+                PreviewAcceptCheckbox.IsEnabled = isResolutionEnabled;
+                ConflictKeepOurs.IsEnabled = isResolutionEnabled;
+                ConflictKeepTheirs.IsEnabled = isResolutionEnabled;
+                ConflictKeepBoth.IsEnabled = isResolutionEnabled;
+
+                if (FinalizeMergeButton != null)
+                    FinalizeMergeButton.Visibility = (CurrentMode == DiffMergeMode.HistoricalViewer)
+                        ? Visibility.Collapsed : Visibility.Visible;
             }
             else
             {
-                // Revert to normal mode: clear any temporary additions/deletions
-                PreviewStateService.Clear();
-                _updateHandler.Queue(new DiffMergeUpdateRequest
-                {
-                    AllChanges = _currentChanges,
-                    IncludedStates = GetIncludedStates(),
-                    ConflictResolutions = PreviewStateService.ConflictResolutions,
-                    ZoomToElement = false,
-                    CurrentIndex = -1
-                });
+                PreviewActionPanel.Visibility = Visibility.Collapsed;
+                ListActionPanel.Visibility = Visibility.Visible;
             }
-            _updateExternalEvent.Raise();
         }
 
         private List<bool> GetIncludedStates()
@@ -880,17 +852,17 @@ namespace RevitVersionControl.UI
                 string locType = locJson["type"]?.ToString();
                 if (locType == "point")
                 {
-                    double x = locJson["point"]?["x"]?.Value<double>() ?? 0;
-                    double y = locJson["point"]?["y"]?.Value<double>() ?? 0;
-                    double z = locJson["point"]?["z"]?.Value<double>() ?? 0;
+                    double x = locJson["point"]?["x"]?.ToObject<double>() ?? 0;
+                    double y = locJson["point"]?["y"]?.ToObject<double>() ?? 0;
+                    double z = locJson["point"]?["z"]?.ToObject<double>() ?? 0;
                     return $"({x:F2}, {y:F2}, {z:F2})";
                 }
                 if (locType == "curve")
                 {
-                    double sx = locJson["startPoint"]?["x"]?.Value<double>() ?? 0;
-                    double sy = locJson["startPoint"]?["y"]?.Value<double>() ?? 0;
-                    double ex2 = locJson["endPoint"]?["x"]?.Value<double>() ?? 0;
-                    double ey2 = locJson["endPoint"]?["y"]?.Value<double>() ?? 0;
+                    double sx  = locJson["startPoint"]?["x"]?.ToObject<double>() ?? 0;
+                    double sy  = locJson["startPoint"]?["y"]?.ToObject<double>() ?? 0;
+                    double ex2 = locJson["endPoint"]?["x"]?.ToObject<double>() ?? 0;
+                    double ey2 = locJson["endPoint"]?["y"]?.ToObject<double>() ?? 0;
                     return $"({sx:F2},{sy:F2}) to ({ex2:F2},{ey2:F2})";
                 }
             }
@@ -984,6 +956,182 @@ namespace RevitVersionControl.UI
                 PreviewConflictPanel.Visibility = Visibility.Collapsed;
                 PreviewElementDetails.Text = item.Description + "\n\n" + item.Details;
             }
+        }
+
+        private void StartVisualMerge_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentChanges == null || _currentChanges.Count == 0) return;
+            _previewIndex = 0;
+
+            _previewHandler.Queue(new DiffMergeApplyRequest
+            {
+                ProjectId = _currentProjectId,
+                TargetCommitId = _currentTargetCommitId,
+                ModelId = _currentModelId,
+                Changes = new List<Change>(_currentChanges)
+            });
+            _previewExternalEvent.Raise();
+
+            SetPreviewMode(true);
+            UpdatePreviewCard();
+        }
+
+        private void CancelPreview_Click(object sender, RoutedEventArgs e)
+        {
+            SetPreviewMode(false);
+            PreviewStateService.Clear();
+            _previewIndex = -1;
+            Clear();
+        }
+
+        private List<ChangeItem> BuildChangeItems(List<Change> changes, List<Conflict> conflicts)
+        {
+            var items = new List<ChangeItem>();
+            if (changes == null || changes.Count == 0)
+            {
+                items.Add(new ChangeItem
+                {
+                    ChangeType = "-",
+                    StatusColor = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
+                    ElementType = "No changes",
+                    Description = "No changes available",
+                    Details = "",
+                    IsSelected = false
+                });
+                return items;
+            }
+
+            // Build conflict lookup by both repoGuid and elementId
+            var conflictMap = new Dictionary<string, Conflict>();
+            if (conflicts != null)
+            {
+                foreach (var c in conflicts)
+                {
+                    if (c.ConflictType == "spatial_collision" && c.ElementId != null && c.ElementId.Contains("|"))
+                    {
+                        foreach (var part in c.ElementId.Split('|'))
+                        {
+                            if (!conflictMap.ContainsKey(part))
+                                conflictMap[part] = c;
+                        }
+                    }
+                    else if (c.ElementId != null)
+                    {
+                        conflictMap[c.ElementId] = c;
+                    }
+                }
+            }
+
+            foreach (var change in changes)
+            {
+                string identity = change.RepoGuid ?? change.ElementId;
+                Conflict conflict = null;
+                if (!conflictMap.TryGetValue(identity, out conflict))
+                    conflictMap.TryGetValue(change.ElementId ?? "", out conflict);
+
+                var item = new ChangeItem
+                {
+                    ChangeType = conflict != null ? "CNFL" : GetShortChangeType(change.ChangeType),
+                    StatusColor = conflict != null
+                        ? new SolidColorBrush(Color.FromRgb(255, 0, 255))
+                        : GetStatusColor(change.ChangeType),
+                    ElementType = $"{change.Category}: {change.Type}",
+                    Description = conflict != null ? conflict.Description : BuildDescription(change),
+                    Details = BuildDetails(change),
+                    ElementId = change.ElementId,
+                    RepoGuid = change.RepoGuid,
+                    TrackingKey = PreviewStateService.GetChangeTrackingKey(change),
+                    IsSelected = true,
+                    IsConflict = conflict != null,
+                    ConflictType = conflict?.ConflictType,
+                    ConflictId = conflict?.ElementId,
+                    ConflictDescription = conflict?.Description
+                };
+
+                items.Add(item);
+            }
+
+            return items;
+        }
+
+        private static string GetShortChangeType(string changeType)
+        {
+            switch (changeType)
+            {
+                case "added":    return "ADD";
+                case "modified": return "MOD";
+                case "deleted":  return "DEL";
+                default:         return changeType?.ToUpperInvariant() ?? "-";
+            }
+        }
+
+        private static SolidColorBrush GetStatusColor(string changeType)
+        {
+            switch (changeType)
+            {
+                case "added":    return new SolidColorBrush(Color.FromRgb(40,  167, 69));
+                case "modified": return new SolidColorBrush(Color.FromRgb(255, 193, 7));
+                case "deleted":  return new SolidColorBrush(Color.FromRgb(220, 53,  69));
+                default:         return new SolidColorBrush(Color.FromRgb(160, 160, 160));
+            }
+        }
+
+        private static string BuildDescription(Change change)
+        {
+            switch (change.ChangeType)
+            {
+                case "added":    return "Element added";
+                case "modified": return "Element modified";
+                case "deleted":  return "Element deleted";
+                default:         return "Change detected";
+            }
+        }
+
+        private static string BuildDetails(Change change)
+        {
+            var details = new List<string>();
+            if (change.ParameterChanges != null && change.ParameterChanges.Count > 0)
+            {
+                var preview = change.ParameterChanges.Take(3)
+                    .Select(p => $"{p.Name}: {p.OldValue} -> {p.NewValue}");
+                details.Add(string.Join("; ", preview));
+            }
+            if (change.GeometryChanged) details.Add("Geometry changed");
+            if (change.LocationChanged) details.Add("Location changed");
+            return string.Join(" | ", details);
+        }
+
+        public class ChangeItem : INotifyPropertyChanged
+        {
+            private bool _isSelected;
+
+            public string ChangeType { get; set; }
+            public Brush StatusColor { get; set; }
+            public string ElementType { get; set; }
+            public string Description { get; set; }
+            public string Details { get; set; }
+            public string ElementId { get; set; }
+            public string RepoGuid { get; set; }
+            public string TrackingKey { get; set; }
+
+            // Conflict fields
+            public bool IsConflict { get; set; }
+            public string ConflictType { get; set; }
+            public string ConflictId { get; set; }
+            public string ConflictDescription { get; set; }
+            public string Resolution { get; set; }
+
+            public bool IsSelected
+            {
+                get => _isSelected;
+                set
+                {
+                    _isSelected = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+                }
+            }
+
+            public event PropertyChangedEventHandler PropertyChanged;
         }
     }
 }
