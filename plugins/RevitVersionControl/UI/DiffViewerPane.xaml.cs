@@ -19,6 +19,14 @@ namespace RevitVersionControl.UI
         private Guid _sessionId = Guid.Empty;
         private DiffResult _lastDiffResult;  // stored for Apply Selected
 
+        // Merge mode context
+        private bool _isMergeMode;
+        private string _mergeProjectId;
+        private string _mergeSourceCommitId;  // "ours"
+        private string _mergeTargetCommitId;  // "theirs"
+        private string _mergeTargetBranchName;
+        private Merge3WayResult _merge3WayResult;
+
         // Hint state used to auto-select the user's current commit when projects/branches load.
         private string _autoSelectCommitId;
         private string _autoSelectBranchName;
@@ -49,11 +57,23 @@ namespace RevitVersionControl.UI
         /// Trigger the full Compare pipeline for merge: fetch diff + snapshot, build visual diff view,
         /// and populate the pane with proper element IDs (same as clicking Compare manually).
         /// </summary>
-        public async void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName)
+        public async void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName, Merge3WayResult merge3Way)
         {
             if (diffResult == null) { Clear(resetPickers: false); return; }
 
-            // Store the diff for Apply Selected Changes
+            if (merge3Way == null)
+            {
+                MessageBox.Show("Cannot proceed with merge: 3-way conflict analysis is required but unavailable.", "Merge Blocked", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // Store merge context
+            _isMergeMode = true;
+            _mergeProjectId = projectId;
+            _mergeSourceCommitId = baseCommitId;
+            _mergeTargetCommitId = targetCommitId;
+            _mergeTargetBranchName = targetBranchName;
+            _merge3WayResult = merge3Way;
             _lastDiffResult = diffResult;
 
             // Show a merge banner immediately
@@ -111,10 +131,11 @@ namespace RevitVersionControl.UI
                         {
                             if (result != null && result.Success)
                             {
-                                // The LoadResult call populates rows with proper LiveElementId/GhostElementId
                                 LoadResult(result);
-                                // Override the banner to show merge mode
-                                StatusBanner.Text = $"Merge mode: Select changes to apply from '{targetBranchName}'";
+                                AnnotateConflictRows();
+                                int conflictCount = _merge3WayResult?.Conflicts?.Count ?? 0;
+                                string conflictInfo = conflictCount > 0 ? $" ({conflictCount} conflict(s) — pick one side per conflict)" : "";
+                                StatusBanner.Text = $"Merge mode: Select changes to apply from '{targetBranchName}'{conflictInfo}";
                                 StatusBanner.Visibility = Visibility.Visible;
                             }
                             else
@@ -180,6 +201,16 @@ namespace RevitVersionControl.UI
             _allRows.Clear();
             _diffViewId = null;
             _sessionId = Guid.Empty;
+            _lastDiffResult = null;
+
+            // Reset merge context
+            _isMergeMode = false;
+            _mergeProjectId = null;
+            _mergeSourceCommitId = null;
+            _mergeTargetCommitId = null;
+            _mergeTargetBranchName = null;
+            _merge3WayResult = null;
+
             AddedCountText.Text = "0 added";
             ModifiedCountText.Text = "0 modified";
             DeletedCountText.Text = "0 deleted";
@@ -662,7 +693,99 @@ namespace RevitVersionControl.UI
 
         // ===== Selection / Apply =====
 
-        private void RowCheckBox_Click(object sender, RoutedEventArgs e) => UpdateSelectionCount();
+        /// <summary>
+        /// Annotate rows with conflict group information from the 3-way merge result.
+        /// Conflicting elements get the same ConflictGroupId but different ConflictSide.
+        /// </summary>
+        private void AnnotateConflictRows()
+        {
+            if (_merge3WayResult?.Conflicts == null || _merge3WayResult.Conflicts.Count == 0) return;
+
+            // Build a set of conflicting element IDs
+            var conflictElementIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in _merge3WayResult.Conflicts)
+            {
+                if (!string.IsNullOrEmpty(c.ElementId))
+                    conflictElementIds.Add(c.ElementId);
+            }
+
+            // Build sets for source vs target changes to determine "side"
+            var sourceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var targetIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ch in _merge3WayResult.SourceChanges ?? new List<Change>())
+            {
+                string id = ch.RepoGuid ?? ch.ElementId ?? "";
+                if (!string.IsNullOrEmpty(id)) sourceIds.Add(id);
+            }
+            foreach (var ch in _merge3WayResult.TargetChanges ?? new List<Change>())
+            {
+                string id = ch.RepoGuid ?? ch.ElementId ?? "";
+                if (!string.IsNullOrEmpty(id)) targetIds.Add(id);
+            }
+
+            foreach (var row in _allRows)
+            {
+                string rowId = row.RepoGuid ?? "";
+                if (string.IsNullOrEmpty(rowId)) continue;
+
+                // Check if this row's element is in a conflict
+                bool isConflict = conflictElementIds.Contains(rowId);
+                if (!isConflict) continue;
+
+                row.ConflictGroupId = rowId;
+
+                // Determine side: if it appears in source → ours, if in target → theirs
+                if (sourceIds.Contains(rowId) && targetIds.Contains(rowId))
+                {
+                    // Both sides have this element. The diff we display is source→target,
+                    // so the row represents the "theirs" change. We need to check index:
+                    // The diff between our commit and their commit shows "their" version as the target.
+                    row.ConflictSide = "theirs";
+                    row.Note = "⚠ CONFLICT (theirs)";
+                    row.IsSelected = false; // Default: deselect "theirs", keep "ours"
+                }
+                else if (sourceIds.Contains(rowId))
+                {
+                    row.ConflictSide = "ours";
+                    row.Note = "⚠ CONFLICT (ours — current)";
+                    row.IsSelected = true;
+                }
+                else if (targetIds.Contains(rowId))
+                {
+                    row.ConflictSide = "theirs";
+                    row.Note = "⚠ CONFLICT (theirs — incoming)";
+                    row.IsSelected = false;
+                }
+            }
+
+            ApplyFilter();
+            UpdateSelectionCount();
+        }
+
+        private void RowCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && cb.DataContext is DiffRow clickedRow
+                && !string.IsNullOrEmpty(clickedRow.ConflictGroupId))
+            {
+                // Mutual exclusion: if checking this row, uncheck the other side in the same conflict group
+                if (clickedRow.IsSelected)
+                {
+                    foreach (var other in _allRows)
+                    {
+                        if (other != clickedRow
+                            && other.ConflictGroupId == clickedRow.ConflictGroupId
+                            && other.ConflictSide != clickedRow.ConflictSide)
+                        {
+                            other.IsSelected = false;
+                        }
+                    }
+                    // Refresh the list to show updated checkboxes
+                    ApplyFilter();
+                }
+            }
+            UpdateSelectionCount();
+        }
 
         private void SelectAll_Click(object sender, RoutedEventArgs e)
         {
@@ -692,10 +815,26 @@ namespace RevitVersionControl.UI
                 return;
             }
 
+            // Validate conflict constraints: can't select both sides
+            if (_isMergeMode && _merge3WayResult?.Conflicts != null)
+            {
+                foreach (var conflict in _merge3WayResult.Conflicts)
+                {
+                    string cid = conflict.ElementId ?? "";
+                    if (string.IsNullOrEmpty(cid)) continue;
+
+                    var conflictRows = _allRows.Where(r => r.ConflictGroupId == cid && r.IsSelected).ToList();
+                    var sides = conflictRows.Select(r => r.ConflictSide).Where(s => s != null).Distinct().ToList();
+                    if (sides.Count > 1)
+                    {
+                        MessageBox.Show($"Conflict for element '{cid}': you must pick only ONE side (ours or theirs), not both.", "Conflict Error",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                }
+            }
+
             // Build selected changes using index-based matching.
-            // _allRows[i] corresponds 1:1 to _lastDiffResult.Changes[i] because
-            // DiffViewService.Build() iterates changes in order and LoadResult()
-            // copies rows in order.
             var selectedChanges = new List<Change>();
             int changeCount = _lastDiffResult.Changes.Count;
             for (int i = 0; i < _allRows.Count && i < changeCount; i++)
@@ -704,10 +843,9 @@ namespace RevitVersionControl.UI
                     selectedChanges.Add(_lastDiffResult.Changes[i]);
             }
 
-            // Fallback: also try RepoGuid matching for rows beyond the index range
-            // (shouldn't happen, but defensive)
             if (selectedChanges.Count == 0)
             {
+                // Fallback: RepoGuid matching
                 var selectedRepoGuids = new HashSet<string>(
                     _allRows.Where(r => r.IsSelected && !string.IsNullOrEmpty(r.RepoGuid))
                             .Select(r => r.RepoGuid), StringComparer.OrdinalIgnoreCase);
@@ -728,11 +866,12 @@ namespace RevitVersionControl.UI
             int modCount = selectedChanges.Count(c => c.ChangeType == "modified");
             int delCount = selectedChanges.Count(c => c.ChangeType == "deleted");
 
+            string mergeNote = _isMergeMode ? "\n\nA merge commit will be created after applying." : "";
             var confirm = MessageBox.Show(
                 $"Apply {selectedChanges.Count} selected change(s)?\n\n" +
                 $"  • Added: {addCount}\n" +
                 $"  • Modified: {modCount}\n" +
-                $"  • Deleted: {delCount}\n\n" +
+                $"  • Deleted: {delCount}{mergeNote}\n\n" +
                 "This will modify your active Revit model.",
                 "Confirm Apply",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -746,7 +885,20 @@ namespace RevitVersionControl.UI
                 return;
             }
 
-            string projectId = (ProjectComboBox.SelectedItem as Project)?.ProjectId;
+            // Disable button immediately to prevent duplicate clicks
+            ApplySelectedButton.IsEnabled = false;
+
+            string projectId = _isMergeMode ? _mergeProjectId : (ProjectComboBox.SelectedItem as Project)?.ProjectId;
+
+            // Capture merge context before it gets cleared
+            bool isMerge = _isMergeMode;
+            string mergeProjectId = _mergeProjectId;
+            string mergeSourceCommitId = _mergeSourceCommitId;
+            string mergeTargetCommitId = _mergeTargetCommitId;
+            string mergeTargetBranchName = _mergeTargetBranchName;
+            Merge3WayResult merge3Way = _merge3WayResult;
+            ElementId diffViewId = _diffViewId;
+            Guid sessionId = _sessionId;
 
             DiffViewerExternalEvent.Instance.Queue(new DiffViewerRequest
             {
@@ -755,15 +907,37 @@ namespace RevitVersionControl.UI
                 ApplyProjectId = projectId,
                 OnApplyComplete = result =>
                 {
-                    Dispatcher.Invoke(() =>
+                    Dispatcher.Invoke(async () =>
                     {
                         if (result != null && result.Success)
                         {
+                            // 1. Clean ghosts/bounding boxes
+                            if (DiffViewerExternalEvent.Instance != null && DiffViewerExternalEvent.Event != null)
+                            {
+                                DiffViewerExternalEvent.Instance.Queue(new DiffViewerRequest
+                                {
+                                    Operation = DiffViewerOperation.Clear,
+                                    DiffViewId = diffViewId,
+                                    SessionId = sessionId == Guid.Empty ? (Guid?)null : sessionId,
+                                    OnClearComplete = () => { }
+                                });
+                                DiffViewerExternalEvent.Event.Raise();
+                            }
+
+                            // 2. Create merge commit on backend if in merge mode
+                            if (isMerge && !string.IsNullOrEmpty(mergeProjectId))
+                            {
+                                await CreateMergeCommitAsync(mergeProjectId, merge3Way?.CommonAncestorId ?? mergeSourceCommitId, mergeSourceCommitId, mergeTargetCommitId, mergeTargetBranchName, merge3Way);
+                            }
+
+                            // 3. Reset the panel
+                            Clear();
                             MessageBox.Show(result.Summary ?? "Changes applied successfully.",
                                 "Apply Complete", MessageBoxButton.OK, MessageBoxImage.Information);
                         }
                         else
                         {
+                            ApplySelectedButton.IsEnabled = true;
                             MessageBox.Show(result?.Summary ?? "Failed to apply changes.",
                                 "Apply Failed", MessageBoxButton.OK, MessageBoxImage.Error);
                         }
@@ -771,6 +945,48 @@ namespace RevitVersionControl.UI
                 }
             });
             DiffViewerExternalEvent.Event.Raise();
+        }
+
+        /// <summary>
+        /// Create a merge commit on the backend after applying changes locally.
+        /// </summary>
+        private async Task CreateMergeCommitAsync(string projectId, string baseCommit, string sourceCommit, string targetCommit, string targetBranchName, Merge3WayResult merge3Way)
+        {
+            try
+            {
+                // Build resolution list from conflict selections
+                var resolutions = new List<ConflictResolution>();
+                if (merge3Way?.Conflicts != null)
+                {
+                    foreach (var conflict in merge3Way.Conflicts)
+                    {
+                        string cid = conflict.ElementId ?? "";
+                        if (string.IsNullOrEmpty(cid)) continue;
+
+                        var selectedRow = _allRows.FirstOrDefault(r => r.ConflictGroupId == cid && r.IsSelected);
+                        string resolution = selectedRow?.ConflictSide == "theirs" ? "accept_remote" : "keep_local";
+                        resolutions.Add(new ConflictResolution { ElementId = cid, ResolutionType = resolution });
+                    }
+                }
+
+                string message = $"Merge branch '{targetBranchName}' into current";
+                var mergeResult = await _apiClient.MergeCommitAsync(projectId, baseCommit, sourceCommit, targetCommit, resolutions, message);
+
+                if (mergeResult != null && mergeResult.Status == "success")
+                {
+                    // Update local tracking to the new merge commit
+                    var hint = DocumentSyncStateService.GetProjectHint(projectId);
+                    if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
+                    {
+                        DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, projectId, hint.ModelId, mergeResult.MergeCommitId, hint.CurrentBranchName);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Changes applied locally but merge commit creation failed:\n{ex.Message}\n\nYou may need to commit manually.", "Merge Commit Warning",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         // ===== Models =====
@@ -793,6 +1009,8 @@ namespace RevitVersionControl.UI
             public long LiveElementIdValue { get; set; }
             public long GhostElementIdValue { get; set; }
             public bool IsSelected { get; set; } = true;
+            public string ConflictGroupId { get; set; }  // null = not a conflict
+            public string ConflictSide { get; set; }     // "ours" or "theirs"
 
             public string ShortType => ChangeType switch
             {

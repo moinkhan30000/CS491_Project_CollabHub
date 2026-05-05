@@ -224,8 +224,8 @@ namespace RevitVersionControl
         public void Show(Services.DiffViewBuildResult result) => _pane?.LoadResult(result);
         public void ReloadProjects() => _pane?.ReloadProjects();
         public void Clear() => _pane?.Clear(resetPickers: true);
-        public void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName) =>
-            _pane?.LoadDiffForMerge(diffResult, projectId, baseCommitId, targetCommitId, targetBranchName);
+        public void LoadDiffForMerge(DiffResult diffResult, string projectId, string baseCommitId, string targetCommitId, string targetBranchName, Merge3WayResult merge3Way) =>
+            _pane?.LoadDiffForMerge(diffResult, projectId, baseCommitId, targetCommitId, targetBranchName, merge3Way);
     }
 
     public class DiffMergePaneProvider : IDockablePaneProvider

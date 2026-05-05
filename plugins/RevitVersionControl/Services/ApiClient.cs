@@ -429,6 +429,22 @@ namespace RevitVersionControl.Services
             return await GetAsync<HistoricalMergeResult>($"/projects/{projectId}/commits/{commitId}/merge_decisions");
         }
 
+        /// <summary>
+        /// Create a merge commit on the backend, finalizing the branch merge.
+        /// </summary>
+        public async Task<MergeCommitResult> MergeCommitAsync(string projectId, string baseCommit, string sourceCommit, string targetCommit, List<ConflictResolution> resolutions, string message)
+        {
+            var payload = new
+            {
+                baseCommit,
+                sourceCommit,
+                targetCommit,
+                resolutions = resolutions ?? new List<ConflictResolution>(),
+                message = message ?? "Merge"
+            };
+            return await PostAsync<MergeCommitResult>($"/projects/{projectId}/merge", payload);
+        }
+
         // ========== Generic HTTP Methods ==========
 
         private async Task<T> GetAsync<T>(string endpoint)
@@ -842,6 +858,24 @@ namespace RevitVersionControl.Services
 
         [JsonProperty("resolution")]
         public string ResolutionType { get; set; }
+    }
+
+    public class MergeCommitResult
+    {
+        [JsonProperty("mergeCommitId")]
+        public string MergeCommitId { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; }
+
+        [JsonProperty("appliedChanges")]
+        public int AppliedChanges { get; set; }
+
+        [JsonProperty("skippedChanges")]
+        public int SkippedChanges { get; set; }
+
+        [JsonProperty("conflicts")]
+        public List<Conflict> Conflicts { get; set; }
     }
 
     public class HistoricalMergeResult

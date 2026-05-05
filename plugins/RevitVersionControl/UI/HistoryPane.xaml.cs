@@ -299,22 +299,29 @@ namespace RevitVersionControl.UI
                                 }
                                 else
                                 {
-                                    // Store the diff result in the DiffViewerPane for the user to review
-                                    DiffViewerPaneProvider.Instance?.LoadDiffForMerge(diffResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, branchToMerge);
-                                    
-                                    // Also check for conflicts using 3-way merge
-                                    bool hasConflicts = false;
-                                    int conflictCount = 0;
+                                    // Get 3-way merge analysis first (required for conflict detection)
+                                    Merge3WayResult mergeResult = null;
                                     try
                                     {
-                                        var mergeResult = await _apiClient.Merge3WayAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
-                                        if (mergeResult != null && mergeResult.HasConflicts)
-                                        {
-                                            hasConflicts = true;
-                                            conflictCount = mergeResult.Conflicts?.Count ?? 0;
-                                        }
+                                        mergeResult = await _apiClient.Merge3WayAsync(project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId);
                                     }
-                                    catch { /* 3-way merge check failed, proceed with diff-based merge */ }
+                                    catch (Exception mergeEx)
+                                    {
+                                        MessageBox.Show($"3-way merge analysis failed:\n{mergeEx.Message}\n\nCannot proceed with merge without conflict detection.", "Merge Blocked", MessageBoxButton.OK, MessageBoxImage.Error);
+                                        return;
+                                    }
+
+                                    if (mergeResult == null)
+                                    {
+                                        MessageBox.Show("3-way merge analysis returned no data. Cannot proceed.", "Merge Blocked", MessageBoxButton.OK, MessageBoxImage.Error);
+                                        return;
+                                    }
+
+                                    // Pass both diff and 3-way result to the DiffViewer
+                                    DiffViewerPaneProvider.Instance?.LoadDiffForMerge(diffResult, project.ProjectId, currentCommitId, targetBranchObj.HeadCommitId, branchToMerge, mergeResult);
+
+                                    bool hasConflicts = mergeResult.HasConflicts;
+                                    int conflictCount = mergeResult.Conflicts?.Count ?? 0;
 
                                     string message;
                                     if (hasConflicts)
@@ -322,7 +329,8 @@ namespace RevitVersionControl.UI
                                         message = $"⚠️ {conflictCount} CONFLICT(S) detected!\n\n" +
                                             $"Found {diffResult.Changes.Count} total change(s) between your branch and '{branchToMerge}'.\n\n" +
                                             "The Diff Viewer has been opened with all changes listed.\n" +
-                                            "Use the CHECKBOXES to select which changes you want to apply, then click 'Apply Selected Changes'.";
+                                            "Conflicting elements are marked — you must pick ONE side per conflict.\n" +
+                                            "Then click 'Apply Selected Changes' to apply and create a merge commit.";
                                     }
                                     else
                                     {
