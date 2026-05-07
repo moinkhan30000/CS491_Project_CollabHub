@@ -5,6 +5,8 @@
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <ContextMenu x:Key="CommitContextMenu">
+            <MenuItem Header="Create Branch From Here" Click="CreateBranchFromCommit_Click" FontWeight="Bold"/>
+            <Separator/>
             <MenuItem Header="View Merge Decisions" Click="ViewMergeDecisions_Click"/>
             <MenuItem Header="Compare Selected Commits" Click="CompareCommits_Click"/>
         </ContextMenu>

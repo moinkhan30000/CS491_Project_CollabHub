@@ -31,10 +31,17 @@
             <TextBlock Name="PublishingToBranchText" FontWeight="Bold" Foreground="#007ACC" 
                        Text="Publishing to active branch: main" FontSize="14" Margin="0,0,0,5"/>
             <StackPanel Name="DetachedBranchPanel" Visibility="Collapsed">
-                <TextBlock Text="You are currently on an older commit. To prevent overwriting history, you must create a new branch." 
-                           Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,5"/>
-                <Label Content="New Branch Name:" FontWeight="Bold" Padding="0,0,0,2"/>
-                <TextBox Name="NewBranchTextBox" Height="30" VerticalContentAlignment="Center"/>
+                <TextBlock Text="You are currently on an older commit and cannot publish here." 
+                           Foreground="Red" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                <TextBlock TextWrapping="Wrap" Foreground="#666666" Margin="0,0,0,5">
+                    To publish your changes, you must first do one of the following:
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Foreground="#333333" Margin="10,0,0,3">
+                    • Pull the latest commit from the current branch (use History panel)
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap" Foreground="#333333" Margin="10,0,0,3">
+                    • Create a new branch from Manage Branches and switch to it
+                </TextBlock>
             </StackPanel>
         </StackPanel>
 

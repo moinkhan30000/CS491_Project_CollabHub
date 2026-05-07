@@ -147,18 +147,18 @@ namespace RevitVersionControl.UI
         public string BaseCommitId { get; private set; }
         
         private System.Windows.Controls.TextBox _textBox;
-        private System.Windows.Controls.ComboBox _baseBranchComboBox;
-        private List<Branch> _branches;
-        private string _activeCommitId;
 
         public NewBranchPromptDialog(List<Branch> branches, string activeCommitId)
         {
-            _branches = branches;
-            _activeCommitId = activeCommitId;
+            BaseCommitId = activeCommitId;
+
+            string shortCommit = !string.IsNullOrEmpty(activeCommitId) && activeCommitId.Length > 8
+                ? activeCommitId.Substring(0, 8)
+                : (activeCommitId ?? "unknown");
 
             Title = "New Branch";
             Width = 320;
-            Height = 220;
+            Height = 180;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.NoResize;
 
@@ -167,36 +167,31 @@ namespace RevitVersionControl.UI
             grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = System.Windows.GridLength.Auto });
             grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = System.Windows.GridLength.Auto });
             grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = System.Windows.GridLength.Auto });
-            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = System.Windows.GridLength.Auto });
 
-            var label1 = new System.Windows.Controls.TextBlock { Text = "Base Branch/Commit:", FontWeight = FontWeights.Bold, Margin = new Thickness(0,0,0,5) };
-            System.Windows.Controls.Grid.SetRow(label1, 0);
-            grid.Children.Add(label1);
+            var infoLabel = new System.Windows.Controls.TextBlock
+            {
+                Text = $"Branching from current commit: {shortCommit}",
+                Foreground = System.Windows.Media.Brushes.Gray,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            System.Windows.Controls.Grid.SetRow(infoLabel, 0);
+            grid.Children.Add(infoLabel);
 
-            _baseBranchComboBox = new System.Windows.Controls.ComboBox { Margin = new Thickness(0,0,0,15), Height = 25, DisplayMemberPath = "Name" };
-            _baseBranchComboBox.ItemsSource = _branches;
-            if (_branches.Count > 0) _baseBranchComboBox.SelectedIndex = 0;
-            System.Windows.Controls.Grid.SetRow(_baseBranchComboBox, 1);
-            grid.Children.Add(_baseBranchComboBox);
-
-            var label2 = new System.Windows.Controls.TextBlock { Text = "New Branch Name:", FontWeight = FontWeights.Bold, Margin = new Thickness(0,0,0,5) };
-            System.Windows.Controls.Grid.SetRow(label2, 2);
-            grid.Children.Add(label2);
+            var label = new System.Windows.Controls.TextBlock { Text = "New Branch Name:", FontWeight = FontWeights.Bold, Margin = new Thickness(0,0,0,5) };
+            System.Windows.Controls.Grid.SetRow(label, 1);
+            grid.Children.Add(label);
 
             _textBox = new System.Windows.Controls.TextBox { Margin = new Thickness(0,0,0,20), Height = 25, VerticalContentAlignment = VerticalAlignment.Center };
-            System.Windows.Controls.Grid.SetRow(_textBox, 3);
+            System.Windows.Controls.Grid.SetRow(_textBox, 2);
             grid.Children.Add(_textBox);
 
             var stack = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            System.Windows.Controls.Grid.SetRow(stack, 4);
+            System.Windows.Controls.Grid.SetRow(stack, 3);
             
             var okBtn = new System.Windows.Controls.Button { Content = "Create", Width = 70, Height = 25, Margin = new Thickness(0,0,10,0), IsDefault = true, Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#007ACC")), Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold };
             okBtn.Click += (s, e) => { 
                 BranchName = _textBox.Text.Trim(); 
                 if (string.IsNullOrWhiteSpace(BranchName)) { MessageBox.Show("Name required."); return; }
-                
-                var selectedBase = _baseBranchComboBox.SelectedItem as Branch;
-                BaseCommitId = selectedBase?.HeadCommitId ?? _activeCommitId;
                 
                 DialogResult = true; 
                 Close(); 

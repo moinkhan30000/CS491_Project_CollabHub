@@ -99,11 +99,17 @@ namespace RevitVersionControl.UI
                 {
                     PublishingToBranchText.Visibility = Visibility.Collapsed;
                     DetachedBranchPanel.Visibility = Visibility.Visible;
+                    PublishButton.IsEnabled = false;
+                    PublishButton.Content = "Cannot Publish";
+                    CommitMessageTextBox.IsEnabled = false;
                 }
                 else
                 {
                     PublishingToBranchText.Visibility = Visibility.Visible;
                     DetachedBranchPanel.Visibility = Visibility.Collapsed;
+                    PublishButton.IsEnabled = true;
+                    PublishButton.Content = "Publish";
+                    CommitMessageTextBox.IsEnabled = true;
                     PublishingToBranchText.Text = $"Publishing to active branch: {trackedBranch}";
                 }
             }
@@ -165,24 +171,6 @@ namespace RevitVersionControl.UI
 
             string trackedBranch = _syncStatus.State?.CurrentBranchName ?? "main";
             string finalBranchToPublish = trackedBranch;
-
-            if (DetachedBranchPanel.Visibility == Visibility.Visible)
-            {
-                string newBranch = NewBranchTextBox.Text.Trim();
-                if (string.IsNullOrWhiteSpace(newBranch))
-                {
-                    MessageBox.Show("Please enter a new branch name.", "Validation Error", 
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                if (_existingBranches != null && _existingBranches.Any(b => string.Equals(b.Name, newBranch, StringComparison.OrdinalIgnoreCase)))
-                {
-                    MessageBox.Show($"Branch '{newBranch}' already exists. Because you are on an older commit, you must create a NEW branch.", "Branch Exists", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-                finalBranchToPublish = newBranch;
-            }
 
             CommitMessage = CommitMessageTextBox.Text;
             var selectedProject = ProjectComboBox.SelectedItem as Project;

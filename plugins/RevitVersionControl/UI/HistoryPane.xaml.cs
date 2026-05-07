@@ -13,6 +13,7 @@ namespace RevitVersionControl.UI
         private readonly ApiClient _apiClient = ApiClient.Instance;
         private readonly BranchSwitchEventHandler _switchHandler;
         private readonly Autodesk.Revit.UI.ExternalEvent _switchEvent;
+        private bool _suppressBranchSwitch;
 
         public HistoryPane()
         {
@@ -73,20 +74,18 @@ namespace RevitVersionControl.UI
         {
             try
             {
+                _suppressBranchSwitch = true;
                 BranchComboBox.IsEnabled = false;
                 var branches = await _apiClient.GetBranchesAsync(projectId);
 
-                var allBranches = new List<Branch> { new Branch { Name = "All Branches" } };
-                allBranches.AddRange(branches);
-
-                BranchComboBox.ItemsSource = allBranches;
+                BranchComboBox.ItemsSource = branches;
                 BranchComboBox.DisplayMemberPath = "Name";
-                if (allBranches.Count > 0)
+                if (branches.Count > 0)
                 {
                     string activeBranch = DocumentSyncStateService.GetStatusForProject(
                         null, projectId, false)?.State?.CurrentBranchName ?? "main";
                     
-                    int index = allBranches.FindIndex(b => string.Equals(b.Name, activeBranch, StringComparison.OrdinalIgnoreCase));
+                    int index = branches.FindIndex(b => string.Equals(b.Name, activeBranch, StringComparison.OrdinalIgnoreCase));
                     BranchComboBox.SelectedIndex = index >= 0 ? index : 0;
                 }
             }
@@ -97,6 +96,7 @@ namespace RevitVersionControl.UI
             finally
             {
                 BranchComboBox.IsEnabled = true;
+                _suppressBranchSwitch = false;
             }
         }
 
@@ -120,7 +120,7 @@ namespace RevitVersionControl.UI
                     .ToList();
 
                 var selectedBranch = BranchComboBox.SelectedItem as Branch;
-                if (selectedBranch != null && selectedBranch.Name != "All Branches")
+                if (selectedBranch != null)
                 {
                     if (!string.IsNullOrEmpty(selectedBranch.HeadCommitId))
                     {
@@ -217,8 +217,56 @@ namespace RevitVersionControl.UI
 
         private async void BranchComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (ProjectComboBox.SelectedItem is Project project)
+            if (_suppressBranchSwitch) return;
+            if (!(ProjectComboBox.SelectedItem is Project project)) return;
+            if (!(BranchComboBox.SelectedItem is Branch selectedBranch)) return;
+
+            var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
+            string currentCommitId = hint?.CurrentCommitId;
+            string currentBranchName = hint?.CurrentBranchName ?? "main";
+
+            // If user selected the branch they're already on, just refresh commits
+            if (string.Equals(selectedBranch.Name, currentBranchName, StringComparison.OrdinalIgnoreCase))
             {
+                await LoadCommitsAsync(project.ProjectId);
+                return;
+            }
+
+            // Different branch selected — trigger a branch switch
+            if (!string.IsNullOrWhiteSpace(selectedBranch.HeadCommitId) && selectedBranch.HeadCommitId != currentCommitId)
+            {
+                var result = MessageBox.Show(
+                    $"Switch to branch '{selectedBranch.Name}'?\n\nThis will pull the latest commit from that branch.",
+                    "Switch Branch", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    _switchHandler.Queue(new BranchSwitchRequest
+                    {
+                        ProjectId = project.ProjectId,
+                        TargetBranch = selectedBranch.Name,
+                        TargetCommitId = selectedBranch.HeadCommitId,
+                        CurrentCommitId = currentCommitId
+                    });
+                    _switchEvent.Raise();
+                }
+                else
+                {
+                    // User cancelled — revert dropdown to current branch
+                    _suppressBranchSwitch = true;
+                    var branches = BranchComboBox.ItemsSource as List<Branch>;
+                    int idx = branches?.FindIndex(b => string.Equals(b.Name, currentBranchName, StringComparison.OrdinalIgnoreCase)) ?? -1;
+                    BranchComboBox.SelectedIndex = idx >= 0 ? idx : 0;
+                    _suppressBranchSwitch = false;
+                }
+            }
+            else
+            {
+                // Same commit (e.g., new branch from current position) — just update tracking
+                if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
+                {
+                    DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, project.ProjectId, hint.ModelId, hint.CurrentCommitId, selectedBranch.Name);
+                    CurrentTrackedBranchText.Text = $"Active Branch: {selectedBranch.Name}";
+                }
                 await LoadCommitsAsync(project.ProjectId);
             }
         }
@@ -366,6 +414,167 @@ namespace RevitVersionControl.UI
 
                 var dialog = new NetworkGraphWindow(project.ProjectId, project.Name, currentCommitId);
                 dialog.ShowDialog();
+            }
+        }
+
+        private async void CreateBranchFromCommit_Click(object sender, RoutedEventArgs e)
+        {
+            var menuItem = sender as MenuItem;
+            if (menuItem == null) return;
+
+            var contextMenu = menuItem.Parent as ContextMenu;
+            if (contextMenu == null) return;
+
+            var listViewItem = contextMenu.PlacementTarget as ListViewItem;
+            if (listViewItem == null) return;
+
+            var commitItem = listViewItem.Content as CommitItem;
+            if (commitItem == null || string.IsNullOrEmpty(commitItem.CommitId)) return;
+
+            if (!(ProjectComboBox.SelectedItem is Project project)) return;
+
+            // Prompt for branch name
+            string shortCommitId = commitItem.CommitId.Length > 8 ? commitItem.CommitId.Substring(0, 8) : commitItem.CommitId;
+            var inputWindow = new Window
+            {
+                Title = "Create Branch",
+                Width = 340,
+                Height = 180,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ResizeMode = ResizeMode.NoResize
+            };
+
+            var grid = new System.Windows.Controls.Grid { Margin = new Thickness(15) };
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+
+            var label = new System.Windows.Controls.TextBlock
+            {
+                Text = $"Create branch from commit {shortCommitId}:",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            System.Windows.Controls.Grid.SetRow(label, 0);
+            grid.Children.Add(label);
+
+            var textBox = new System.Windows.Controls.TextBox
+            {
+                Height = 28,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 15)
+            };
+            System.Windows.Controls.Grid.SetRow(textBox, 1);
+            grid.Children.Add(textBox);
+
+            var buttonPanel = new System.Windows.Controls.StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            System.Windows.Controls.Grid.SetRow(buttonPanel, 2);
+
+            var createBtn = new System.Windows.Controls.Button
+            {
+                Content = "Create & Switch",
+                Width = 110,
+                Height = 28,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#007ACC")),
+                Foreground = System.Windows.Media.Brushes.White,
+                FontWeight = FontWeights.Bold,
+                IsDefault = true
+            };
+            createBtn.Click += (s, ev) =>
+            {
+                if (string.IsNullOrWhiteSpace(textBox.Text))
+                {
+                    MessageBox.Show("Please enter a branch name.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                inputWindow.DialogResult = true;
+                inputWindow.Close();
+            };
+
+            var cancelBtn = new System.Windows.Controls.Button
+            {
+                Content = "Cancel",
+                Width = 80,
+                Height = 28,
+                IsCancel = true
+            };
+            cancelBtn.Click += (s, ev) => { inputWindow.DialogResult = false; inputWindow.Close(); };
+
+            buttonPanel.Children.Add(createBtn);
+            buttonPanel.Children.Add(cancelBtn);
+            grid.Children.Add(buttonPanel);
+            inputWindow.Content = grid;
+            inputWindow.Loaded += (s, ev) => textBox.Focus();
+
+            if (inputWindow.ShowDialog() != true) return;
+
+            string newBranchName = textBox.Text.Trim();
+
+            try
+            {
+                // Check if branch already exists
+                var existingBranches = await _apiClient.GetBranchesAsync(project.ProjectId);
+                if (existingBranches.Any(b => string.Equals(b.Name, newBranchName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show($"Branch '{newBranchName}' already exists. Please choose a different name.",
+                        "Branch Exists", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // Create branch from the selected commit
+                await _apiClient.CreateBranchAsync(project.ProjectId, newBranchName, commitItem.CommitId);
+
+                // Reload branches and switch to the new one
+                await LoadBranchesAsync(project.ProjectId);
+                var branches = BranchComboBox.ItemsSource as List<Branch>;
+                var newBranch = branches?.FirstOrDefault(b => string.Equals(b.Name, newBranchName, StringComparison.OrdinalIgnoreCase));
+
+                if (newBranch != null)
+                {
+                    var hint = DocumentSyncStateService.GetProjectHint(project.ProjectId);
+                    string currentCommitId = hint?.CurrentCommitId;
+
+                    if (!string.IsNullOrWhiteSpace(newBranch.HeadCommitId) && newBranch.HeadCommitId != currentCommitId)
+                    {
+                        // Different commit — need to pull
+                        _switchHandler.Queue(new BranchSwitchRequest
+                        {
+                            ProjectId = project.ProjectId,
+                            TargetBranch = newBranchName,
+                            TargetCommitId = newBranch.HeadCommitId,
+                            CurrentCommitId = currentCommitId
+                        });
+                        _switchEvent.Raise();
+                    }
+                    else
+                    {
+                        // Same commit — just update tracking
+                        if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
+                        {
+                            DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, project.ProjectId, hint.ModelId, hint.CurrentCommitId, newBranchName);
+                            CurrentTrackedBranchText.Text = $"Active Branch: {newBranchName}";
+                        }
+                    }
+
+                    _suppressBranchSwitch = true;
+                    BranchComboBox.SelectedItem = newBranch;
+                    _suppressBranchSwitch = false;
+                    await LoadCommitsAsync(project.ProjectId);
+                }
+
+                MessageBox.Show($"Branch '{newBranchName}' created from commit {shortCommitId}!", "Success",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to create branch: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
