@@ -447,6 +447,10 @@ namespace RevitVersionControl.Services
         private CreationResult CreateGenericFamilyInstance(
             string familyName, string typeName, JObject location)
         {
+            if (string.IsNullOrWhiteSpace(familyName) && string.IsNullOrWhiteSpace(typeName))
+                return CreationResult.Failed(
+                    "FamilyInstance: both familyName and typeName are empty — cannot determine which family to create.");
+
             var symbol = FindFamilySymbol(familyName, typeName);
             if (symbol == null)
                 return CreationResult.Failed(

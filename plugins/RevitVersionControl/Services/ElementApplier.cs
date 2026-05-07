@@ -83,19 +83,23 @@ namespace RevitVersionControl.Services
                 trans.Start();
                 try
                 {
+                    // CRITICAL: Process in order delete → modify → add.
+                    // Deletions must happen first so that elements being replaced
+                    // (e.g., when switching branches) are removed before new ones
+                    // are created at the same location.
+                    foreach (var change in changes.Where(c => c.ChangeType == "deleted"))
+                        ApplyDelete(change);
+
+                    foreach (var change in changes.Where(c => c.ChangeType == "modified"))
+                        ApplyModified(change);
+
                     var preHandledAdds = ApplyPayloadBackedAdds(changes);
-                    foreach (var change in changes)
+                    foreach (var change in changes.Where(c => c.ChangeType == "added"))
                     {
                         string changeKey = GetChangeTrackingKey(change);
                         if (!string.IsNullOrWhiteSpace(changeKey) && preHandledAdds.Contains(changeKey))
                             continue;
-
-                        if (change.ChangeType == "deleted")
-                            ApplyDelete(change);
-                        else if (change.ChangeType == "modified")
-                            ApplyModified(change);
-                        else if (change.ChangeType == "added")
-                            ApplyAdd(change);
+                        ApplyAdd(change);
                     }
 
                     trans.Commit();
@@ -147,17 +151,22 @@ namespace RevitVersionControl.Services
             {
                 Element element = ResolveElement(change);
 
+                // If ResolveElement failed, try matching by type+location from oldData
+                if (element == null && change.OldData != null)
+                {
+                    element = FindExistingByOldData(change);
+                }
+
                 if (element == null)
                 {
-                    // If the element is already null, it was already deleted (e.g., host deleted, manual user deletion).
-                    // This means the deletion is already successful.
+                    // Element truly not found — either already deleted or never existed in this doc.
                     _appliedCount++;
                     return;
                 }
 
                 if (element.Pinned)
                 {
-                    element.Pinned = false; // Unpin to allow deletion
+                    element.Pinned = false;
                 }
 
                 _document.Delete(element.Id);
@@ -865,6 +874,99 @@ namespace RevitVersionControl.Services
                     // Check if within ~0.1 feet tolerance
                     if (elPoint.DistanceTo(targetPoint) < 0.1)
                         return el;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Find an existing element using oldData (for deletions during branch switching).
+        /// Same logic as FindExistingByTypeAndLocation but reads from oldData instead of newData.
+        /// </summary>
+        private Element FindExistingByOldData(Change change)
+        {
+            if (change?.OldData == null) return null;
+
+            try
+            {
+                var oldData = JObject.FromObject(change.OldData);
+                string category = oldData["category"]?.ToString();
+                string typeName = oldData["typeName"]?.ToString();
+                var locationObj = oldData["location"] as JObject;
+                if (string.IsNullOrEmpty(category) || locationObj == null) return null;
+
+                string locType = locationObj["type"]?.ToString();
+                XYZ targetPoint = null;
+                XYZ targetEndPoint = null;
+
+                if (locType == "point")
+                {
+                    var pt = locationObj["point"] as JObject;
+                    if (pt != null)
+                    {
+                        double.TryParse(pt["x"]?.ToString(), out double x);
+                        double.TryParse(pt["y"]?.ToString(), out double y);
+                        double.TryParse(pt["z"]?.ToString(), out double z);
+                        targetPoint = new XYZ(x, y, z);
+                    }
+                }
+                else if (locType == "curve")
+                {
+                    var sp = locationObj["startPoint"] as JObject;
+                    var ep = locationObj["endPoint"] as JObject;
+                    if (sp != null)
+                    {
+                        double.TryParse(sp["x"]?.ToString(), out double sx);
+                        double.TryParse(sp["y"]?.ToString(), out double sy);
+                        double.TryParse(sp["z"]?.ToString(), out double sz);
+                        targetPoint = new XYZ(sx, sy, sz);
+                    }
+                    if (ep != null)
+                    {
+                        double.TryParse(ep["x"]?.ToString(), out double ex2);
+                        double.TryParse(ep["y"]?.ToString(), out double ey);
+                        double.TryParse(ep["z"]?.ToString(), out double ez);
+                        targetEndPoint = new XYZ(ex2, ey, ez);
+                    }
+                }
+
+                if (targetPoint == null) return null;
+
+                var collector = new FilteredElementCollector(_document)
+                    .WhereElementIsNotElementType()
+                    .WhereElementIsViewIndependent();
+
+                foreach (Element el in collector)
+                {
+                    if (el?.Category?.Name != category) continue;
+                    if (typeName != null && el.Name != typeName) continue;
+
+                    Location loc = el.Location;
+                    XYZ elPoint = null;
+                    XYZ elEndPoint = null;
+
+                    if (loc is LocationPoint lp)
+                        elPoint = lp.Point;
+                    else if (loc is LocationCurve lc)
+                    {
+                        elPoint = lc.Curve.GetEndPoint(0);
+                        elEndPoint = lc.Curve.GetEndPoint(1);
+                    }
+
+                    if (elPoint == null) continue;
+
+                    // For curves, match both start and end points
+                    if (targetEndPoint != null && elEndPoint != null)
+                    {
+                        if (elPoint.DistanceTo(targetPoint) < 0.1 && elEndPoint.DistanceTo(targetEndPoint) < 0.1)
+                            return el;
+                    }
+                    else if (elPoint.DistanceTo(targetPoint) < 0.1)
+                    {
+                        return el;
+                    }
                 }
             }
             catch { }

@@ -16,6 +16,7 @@ from schemas.diff_schema import (
 from schemas.element_schema import ElementSnapshot
 from repositories.project_repository import ProjectRepository
 from repositories.commit_repository import CommitRepository
+from repositories.branch_repository import BranchRepository
 from diff_engine import DiffEngine
 from services.merge_resolution_applier import MergeResolutionApplier
 from services.historical_decision_service import HistoricalDecisionService
@@ -24,6 +25,7 @@ router = APIRouter()
 diff_engine = DiffEngine()
 project_repo = ProjectRepository()
 commit_repo = CommitRepository()
+branch_repo = BranchRepository()
 resolution_applier = MergeResolutionApplier()
 historical_service = HistoricalDecisionService()
 
@@ -105,7 +107,7 @@ async def merge_commits(
             conflicts=unresolved_conflicts,
         )
 
-    # All conflicts resolved — reconstruct the merged snapshot and persist
+    # All conflicts resolved â€” reconstruct the merged snapshot and persist
     merged_elements = diff_engine.apply_changes(
         base_elements=base_snapshot.elements,
         changes=merged_changes,
@@ -123,6 +125,8 @@ async def merge_commits(
         elements=merged_elements,
     )
 
+    branch_name = merge_request.branchName if merge_request.branchName else (source_commit_meta.branchName if source_commit_meta else None)
+
     new_commit = commit_repo.create_commit(
         project_id=project_id,
         model_id=base_snapshot.modelId,
@@ -135,8 +139,13 @@ async def merge_commits(
         diff=merged_changes,
         element_count=len(merged_elements),
         changed_elements=len(merged_changes),
-        branch_name=source_commit_meta.branchName if source_commit_meta else None,
+        branch_name=branch_name,
     )
+
+    if branch_name:
+        branch = branch_repo.get_branch(project_id, branch_name)
+        if branch:
+            branch_repo.update_branch_head(branch.branchId, new_commit.commitId)
 
     return MergeResult(
         mergeCommitId=new_commit.commitId,

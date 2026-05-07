@@ -54,6 +54,7 @@ class MergeRequest(BaseModel):
     targetCommit: str
     resolutions: List[Resolution] = []
     message: str
+    branchName: Optional[str] = None
 
 class MergeResult(BaseModel):
     mergeCommitId: str

@@ -969,13 +969,15 @@ namespace RevitVersionControl.UI
                     }
                 }
 
+                var hint = DocumentSyncStateService.GetProjectHint(projectId);
+                string currentBranchName = hint?.CurrentBranchName;
+
                 string message = $"Merge branch '{targetBranchName}' into current";
-                var mergeResult = await _apiClient.MergeCommitAsync(projectId, baseCommit, sourceCommit, targetCommit, resolutions, message);
+                var mergeResult = await _apiClient.MergeCommitAsync(projectId, baseCommit, sourceCommit, targetCommit, resolutions, message, currentBranchName);
 
                 if (mergeResult != null && mergeResult.Status == "success")
                 {
                     // Update local tracking to the new merge commit
-                    var hint = DocumentSyncStateService.GetProjectHint(projectId);
                     if (hint != null && !string.IsNullOrWhiteSpace(hint.LastKnownDocumentPath))
                     {
                         DocumentSyncStateService.SaveState(hint.LastKnownDocumentPath, projectId, hint.ModelId, mergeResult.MergeCommitId, hint.CurrentBranchName);

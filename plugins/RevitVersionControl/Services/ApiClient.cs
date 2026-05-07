@@ -432,7 +432,7 @@ namespace RevitVersionControl.Services
         /// <summary>
         /// Create a merge commit on the backend, finalizing the branch merge.
         /// </summary>
-        public async Task<MergeCommitResult> MergeCommitAsync(string projectId, string baseCommit, string sourceCommit, string targetCommit, List<ConflictResolution> resolutions, string message)
+        public async Task<MergeCommitResult> MergeCommitAsync(string projectId, string baseCommit, string sourceCommit, string targetCommit, List<ConflictResolution> resolutions, string message, string branchName)
         {
             var payload = new
             {
@@ -440,7 +440,8 @@ namespace RevitVersionControl.Services
                 sourceCommit,
                 targetCommit,
                 resolutions = resolutions ?? new List<ConflictResolution>(),
-                message = message ?? "Merge"
+                message = message ?? "Merge",
+                branchName = branchName
             };
             return await PostAsync<MergeCommitResult>($"/projects/{projectId}/merge", payload);
         }
